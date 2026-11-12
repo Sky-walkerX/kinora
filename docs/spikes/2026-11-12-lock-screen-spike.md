@@ -133,6 +133,11 @@ More fields exist and are optional: `options` for pickers, toggles and colours (
 - Multiple displays, per-Space choices, the screen saver (`idle`), and the pre-login screen after a restart.
 - Whether WebKit runs inside the sandboxed plug-in, for web wallpapers.
 - A way to apply a selection without restarting WallpaperAgent. System Settings does it, so a path exists.
+  - WallpaperAgent does **not** watch its store. Atomic or in-place writes to `Index.plist` change nothing until it restarts. Tested 2026-11-12.
+  - A quiet apply therefore needs the XPC call System Settings makes. Where to look:
+    - WallpaperAgent's mach services `com.apple.wallpaper` and `com.apple.wallpaper.public`
+    - the strings `desktopWallpaperUserSettingsUpdate`, `storeIndexUpdate`, `userSettingsIntents` and `settingsObservationRequest`
+    - WallpaperSettingsUI and Wallpaper.framework, which make the call on System Settings' side
 
 ## Tooling notes
 
