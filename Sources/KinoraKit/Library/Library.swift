@@ -17,14 +17,26 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
     /// File name inside the library's thumbnails folder.
     public var thumbnail: String
     public var addedAt: Date
+    /// Size of the file the user imported, and of the file Kinora keeps, when known.
+    public var originalBytes: Int64?
+    public var storedBytes: Int64?
 
-    public init(id: UUID = UUID(), name: String, kind: Kind, media: String, thumbnail: String, addedAt: Date) {
+    public init(id: UUID = UUID(), name: String, kind: Kind, media: String, thumbnail: String, addedAt: Date,
+                originalBytes: Int64? = nil, storedBytes: Int64? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.media = media
         self.thumbnail = thumbnail
         self.addedAt = addedAt
+        self.originalBytes = originalBytes
+        self.storedBytes = storedBytes
+    }
+
+    /// Disk space the optimization saved, when it saved any.
+    public var savedBytes: Int64 {
+        guard let originalBytes, let storedBytes, originalBytes > storedBytes else { return 0 }
+        return originalBytes - storedBytes
     }
 }
 
