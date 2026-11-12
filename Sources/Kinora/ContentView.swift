@@ -47,7 +47,7 @@ struct ContentView: View {
             }
         }
         .navigationTitle("Kinora")
-        .navigationSubtitle(library.importing > 0 ? "Importing…" : "\(library.items.count) wallpapers")
+        .navigationSubtitle(subtitle)
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.movie], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             Task {
@@ -65,6 +65,11 @@ struct ContentView: View {
             }
         }
         .onAppear { selection = wallpaper.currentItem ?? library.items.first?.id }
+    }
+
+    private var subtitle: String {
+        if library.importing > 0 { return "Importing…" }
+        return library.items.count == 1 ? "1 wallpaper" : "\(library.items.count) wallpapers"
     }
 
     private var errorShown: Binding<Bool> {
