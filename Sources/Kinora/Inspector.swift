@@ -20,6 +20,13 @@ struct Inspector: View {
                         .clipShape(.rect(cornerRadius: 10))
                         .listRowInsets(EdgeInsets())
                     Text(item.name).font(.headline)
+                    if let stored = item.storedBytes {
+                        LabeledContent("On disk") {
+                            Text(item.savedBytes > 0
+                                 ? "\(stored.formatted(.byteCount(style: .file))), saved \(item.savedBytes.formatted(.byteCount(style: .file)))"
+                                 : stored.formatted(.byteCount(style: .file)))
+                        }
+                    }
                     if wallpaper.currentItem == item.id {
                         Label("On your desktop and Lock Screen", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.secondary)

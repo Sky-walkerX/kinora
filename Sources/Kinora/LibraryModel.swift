@@ -29,9 +29,10 @@ import UniformTypeIdentifiers
         importing += urls.count
         defer { importing -= urls.count }
         var rejected: [String] = []
+        let display = VideoOptimizer.largestDisplayPixels()
         for url in urls {
             do {
-                items.append(try await Self.makeItem(from: url, in: location))
+                items.append(try await Self.makeItem(from: url, in: location, display: display))
             } catch {
                 rejected.append(url.lastPathComponent)
             }
@@ -79,7 +80,7 @@ import UniformTypeIdentifiers
         }
     }
 
-    private static func makeItem(from source: URL, in location: LibraryLocation) async throws -> LibraryItem {
+    private static func makeItem(from source: URL, in location: LibraryLocation, display: CGSize) async throws -> LibraryItem {
         let asset = AVURLAsset(url: source)
         guard try await asset.load(.isPlayable), try await !asset.loadTracks(withMediaType: .video).isEmpty else {
             throw CocoaError(.fileReadCorruptFile)
@@ -88,10 +89,25 @@ import UniformTypeIdentifiers
         let fm = FileManager.default
         try fm.createDirectory(at: location.mediaFolder, withIntermediateDirectories: true)
         try fm.createDirectory(at: location.thumbnailFolder, withIntermediateDirectories: true)
-        let ext = source.pathExtension.isEmpty ? "mov" : source.pathExtension.lowercased()
-        let item = LibraryItem(id: id, name: source.deletingPathExtension().lastPathComponent, kind: .video,
-                               media: "\(id.uuidString).\(ext)", thumbnail: "\(id.uuidString).png", addedAt: Date())
-        try fm.copyItem(at: source, to: location.mediaURL(for: item))
+        let originalBytes = Self.fileSize(source)
+        // Convert once for the displays it will play on; keep the original only when that is smaller.
+        let optimized = location.mediaFolder.appendingPathComponent("\(id.uuidString).mov")
+        var media = optimized.lastPathComponent
+        do {
+            try await VideoOptimizer.optimize(source, to: optimized, display: display)
+            if !VideoOptimization.keepsOptimized(originalBytes: originalBytes, optimizedBytes: Self.fileSize(optimized)) {
+                throw CancellationError()
+            }
+        } catch {
+            try? fm.removeItem(at: optimized)
+            let ext = source.pathExtension.isEmpty ? "mov" : source.pathExtension.lowercased()
+            media = "\(id.uuidString).\(ext)"
+            try fm.copyItem(at: source, to: location.mediaFolder.appendingPathComponent(media))
+        }
+        var item = LibraryItem(id: id, name: source.deletingPathExtension().lastPathComponent, kind: .video,
+                               media: media, thumbnail: "\(id.uuidString).png", addedAt: Date())
+        item.originalBytes = originalBytes
+        item.storedBytes = Self.fileSize(location.mediaURL(for: item))
         do {
             try await writeThumbnail(of: AVURLAsset(url: location.mediaURL(for: item)), to: location.thumbnailURL(for: item))
         } catch {
@@ -100,6 +116,13 @@ import UniformTypeIdentifiers
         }
         return item
     }
+
+    private static func fileSize(_ url: URL) -> Int64 {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    /// Disk space conversion has saved across the library.
+    var savedBytes: Int64 { items.reduce(0) { $0 + $1.savedBytes } }
 
     /// A still from one second in (or the start of a shorter video), at most 1280 points wide.
     private static func writeThumbnail(of asset: AVURLAsset, to url: URL) async throws {

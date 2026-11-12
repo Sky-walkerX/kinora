@@ -89,7 +89,9 @@ struct ContentView: View {
 
     private var subtitle: String {
         if library.importing > 0 { return "Importing…" }
-        return library.items.count == 1 ? "1 wallpaper" : "\(library.items.count) wallpapers"
+        let count = library.items.count == 1 ? "1 wallpaper" : "\(library.items.count) wallpapers"
+        let saved = library.savedBytes
+        return saved > 0 ? "\(count) · \(saved.formatted(.byteCount(style: .file))) saved" : count
     }
 
     private var errorShown: Binding<Bool> {
