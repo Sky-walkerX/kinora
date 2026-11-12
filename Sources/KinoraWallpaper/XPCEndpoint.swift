@@ -3,6 +3,7 @@
 
 import Foundation
 import KinoraKit
+import Security
 
 /// Receives WallpaperAgent's calls on NSXPC's queues, decodes them, and hands them to the
 /// service on the main actor. Every call replies, including the ones Kinora does not support,
@@ -20,9 +21,14 @@ final class XPCEndpoint: NSObject, KinoraWallpaperXPC, @unchecked Sendable {
     private var connections: [NSXPCConnection] = []
 
     func accept(_ connection: NSXPCConnection) -> Bool {
-        // Only Apple's own code hosts wallpaper plug-ins: WallpaperAgent, and possibly System
-        // Settings' wallpaper pane. Messages from anything else are refused.
-        connection.setCodeSigningRequirement("anchor apple")
+        // Only Apple's own code hosts wallpaper plug-ins. ExtensionKit already enforces that: the
+        // plug-in point admits only hosts with Apple's private extension-host entitlement. As a
+        // second check, refuse a peer proven not to be Apple-signed. (NSXPCConnection's
+        // setCodeSigningRequirement crashes on these BoardServices-brokered connections.)
+        if Self.peerSignature(of: connection) == .notApple {
+            log.error("refused a connection from pid \(connection.processIdentifier): not signed by Apple")
+            return false
+        }
         connection.exportedInterface = NSXPCInterface(with: KinoraWallpaperXPC.self)
         connection.exportedObject = self
         connection.remoteObjectInterface = NSXPCInterface(with: KinoraWallpaperHostXPC.self)
@@ -32,8 +38,23 @@ final class XPCEndpoint: NSObject, KinoraWallpaperXPC, @unchecked Sendable {
         }
         lock.withLock { connections.append(connection) }
         connection.resume()
-        log.notice("WallpaperAgent connected, pid \(connection.processIdentifier)")
+        log.notice("host connected, pid \(connection.processIdentifier), signature \(String(describing: Self.peerSignature(of: connection)), privacy: .public)")
         return true
+    }
+
+    enum PeerSignature { case apple, notApple, unknown }
+
+    /// Checks the connecting process's signature against "anchor apple". `unknown` when the
+    /// sandbox does not let the plug-in inspect its peer.
+    static func peerSignature(of connection: NSXPCConnection) -> PeerSignature {
+        var code: SecCode?
+        let attributes = [kSecGuestAttributePid: connection.processIdentifier] as CFDictionary
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess, let code else { return .unknown }
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString("anchor apple" as CFString, [], &requirement) == errSecSuccess, let requirement else { return .unknown }
+        let status = SecCodeCheckValidity(code, [], requirement)
+        if status == errSecSuccess { return .apple }
+        return status == errSecCSReqFailed ? .notApple : .unknown
     }
 
     private func publish(_ json: Data) {
