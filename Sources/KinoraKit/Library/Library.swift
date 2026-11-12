@@ -94,6 +94,8 @@ public struct LibraryLocation: Equatable, Sendable {
 
     public var index: URL { root.appendingPathComponent("library.json") }
     public var settings: URL { root.appendingPathComponent("settings.json") }
+    /// Kinora's live selection, followed by choices made with "Use as Wallpaper".
+    public var selection: URL { root.appendingPathComponent("selection.json") }
     public var mediaFolder: URL { root.appendingPathComponent("Media", isDirectory: true) }
     public var thumbnailFolder: URL { root.appendingPathComponent("Thumbnails", isDirectory: true) }
     public var backupFolder: URL { root.appendingPathComponent("Backups", isDirectory: true) }
