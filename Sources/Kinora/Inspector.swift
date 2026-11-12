@@ -37,6 +37,10 @@ struct Inspector: View {
                 }
             }
 
+            if wallpaper.followsSelection, let rules = wallpaper.selection?.rules {
+                variants(rules)
+            }
+
             Section("Status") {
                 plugInRow
                 wallpaperRow
@@ -53,6 +57,36 @@ struct Inspector: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Lock Screen and dark appearance choices, and the rotation, applied live.
+    private func variants(_ rules: WallpaperRules) -> some View {
+        Section("Your Wallpaper") {
+            Picker("Lock Screen", selection: Binding(get: { rules.lockScreen }, set: { id in
+                Task { await wallpaper.change { $0.lockScreen = id } }
+            })) {
+                Text("Same as Desktop").tag(UUID?.none)
+                Divider()
+                ForEach(library.items) { Text($0.name).tag(UUID?.some($0.id)) }
+            }
+            Picker("Dark Mode", selection: Binding(get: { rules.dark }, set: { id in
+                Task { await wallpaper.change { $0.dark = id } }
+            })) {
+                Text("Same as Light").tag(UUID?.none)
+                Divider()
+                ForEach(library.items) { Text($0.name).tag(UUID?.some($0.id)) }
+            }
+            if let rotation = rules.rotation {
+                LabeledContent("Rotating") {
+                    HStack {
+                        Text("\(rotation.items.count) wallpapers, \(RotationChoice.describe(rotation.interval))")
+                            .foregroundStyle(.secondary)
+                        Button("Stop") { Task { await wallpaper.change { $0.rotation = nil } } }
+                    }
+                }
+            }
+        }
+        .disabled(wallpaper.working)
     }
 
     private var plugInRow: some View {

@@ -43,6 +43,17 @@ struct ContentView: View {
                     .help("Add videos to your library")
             }
             ToolbarItem(placement: .primaryAction) {
+                Menu("Rotate", systemImage: "arrow.trianglehead.2.clockwise.rotate.90") {
+                    Section("Rotate through all wallpapers") {
+                        ForEach(RotationChoice.allCases) { choice in
+                            Button(choice.title) { Task { await rotate(every: choice.interval) } }
+                        }
+                    }
+                }
+                .disabled(library.items.count < 2 || wallpaper.working)
+                .help("Change wallpapers automatically")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button("Inspector", systemImage: "sidebar.right") { showInspector.toggle() }
             }
         }
@@ -65,6 +76,15 @@ struct ContentView: View {
             }
         }
         .onAppear { selection = wallpaper.currentItem ?? library.items.first?.id }
+    }
+
+    private func rotate(every interval: TimeInterval) async {
+        let items = library.items.map(\.id)
+        guard let first = items.first else { return }
+        var rules = wallpaper.followsSelection ? (wallpaper.selection?.rules ?? WallpaperRules(wallpaper: first)) : WallpaperRules(wallpaper: first)
+        rules.schedule = nil
+        rules.rotation = WallpaperRules.Rotation(items: items, interval: interval, since: Date())
+        await wallpaper.apply(rules)
     }
 
     private var subtitle: String {
@@ -169,5 +189,37 @@ struct Thumbnail: View {
         } else {
             Rectangle().fill(.quaternary).overlay { Image(systemName: "film").foregroundStyle(.secondary) }
         }
+    }
+}
+
+/// How often a rotation changes wallpaper.
+enum RotationChoice: CaseIterable, Identifiable {
+    case quarterHour, hour, fourHours, day, unlock
+
+    var id: Self { self }
+
+    var interval: TimeInterval {
+        switch self {
+        case .quarterHour: 15 * 60
+        case .hour: 3600
+        case .fourHours: 4 * 3600
+        case .day: 24 * 3600
+        case .unlock: 0
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .quarterHour: "Every 15 Minutes"
+        case .hour: "Every Hour"
+        case .fourHours: "Every 4 Hours"
+        case .day: "Every Day"
+        case .unlock: "Each Time You Unlock"
+        }
+    }
+
+    static func describe(_ interval: TimeInterval) -> String {
+        allCases.first { $0.interval == interval }.map { $0.title.lowercased() }
+            ?? Duration.seconds(interval).formatted(.units(allowed: [.hours, .minutes], width: .wide))
     }
 }

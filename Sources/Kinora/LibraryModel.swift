@@ -56,6 +56,12 @@ import UniformTypeIdentifiers
         save()
     }
 
+    /// Tells the plug-in to reload the library, settings and selection, and to refresh System
+    /// Settings' tiles.
+    static func postLibraryChanged() {
+        notify_post(KinoraIdentity.libraryChangedNotification)
+    }
+
     // MARK: - Storage
 
     private func load() {
@@ -67,8 +73,7 @@ import UniformTypeIdentifiers
         do {
             try FileManager.default.createDirectory(at: location.root, withIntermediateDirectories: true)
             try LibraryIndex(items: items).encoded().write(to: location.index, options: .atomic)
-            // The plug-in reloads and refreshes System Settings' tiles.
-            notify_post(KinoraIdentity.libraryChangedNotification)
+            Self.postLibraryChanged()
         } catch {
             lastError = "Kinora couldn't save its library: \(error.localizedDescription)"
         }

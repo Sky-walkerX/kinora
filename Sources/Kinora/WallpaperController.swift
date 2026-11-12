@@ -15,6 +15,10 @@ import Observation
     private(set) var plugIn: PlugInState = .unknown
     /// The library item Kinora shows on the desktop, when Kinora is the current wallpaper.
     private(set) var currentItem: UUID?
+    /// Kinora's live selection, which choices made with "Use as Wallpaper" follow.
+    private(set) var selection: KinoraSelection?
+    /// True when macOS's current choice follows the live selection, so changes apply without a restart.
+    private(set) var followsSelection = false
     /// True when another app or System Settings replaced Kinora. Kinora does not fight it.
     private(set) var replacedByOther = false
     private(set) var canRestore = false
@@ -22,6 +26,7 @@ import Observation
     var lastError: String?
 
     private let store = WallpaperStoreFiles.current()
+    private let location = LibraryLocation.current
     private var folderWatcher: DispatchSourceFileSystemObject?
     private var fileWatcher: DispatchSourceFileSystemObject?
     private var pendingRefresh: DispatchWorkItem?
@@ -67,9 +72,12 @@ import Observation
     func refresh() {
         plugIn = PlugInRegistration.state()
         canRestore = store.hasOriginalBackup
+        selection = (try? Data(contentsOf: location.selection)).flatMap(KinoraSelection.decode)
         guard let current = try? store.readPrimary() else { return }
         let configuration = ChoiceConfiguration.decode(WallpaperStoreEditor.kinoraConfiguration(current))
-        currentItem = WallpaperStoreEditor.kinoraIsSelected(current) ? configuration?.wallpaper : nil
+        let isKinora = WallpaperStoreEditor.kinoraIsSelected(current)
+        followsSelection = isKinora && configuration?.follows == true
+        currentItem = isKinora ? configuration?.rules(selection: selection).wallpaper : nil
         replacedByOther = currentItem == nil && canRestore
     }
 
@@ -79,21 +87,44 @@ import Observation
     }
 
     func use(_ item: LibraryItem) async {
+        // A new wallpaper keeps the Lock Screen and dark variants but ends any rotation or schedule.
+        var rules = selection?.rules ?? WallpaperRules(wallpaper: item.id)
+        rules.wallpaper = item.id
+        rules.rotation = nil
+        rules.schedule = nil
+        await apply(rules)
+    }
+
+    /// Changes the live selection. When macOS's choice already follows Kinora, the plug-in picks
+    /// it up at once; otherwise Kinora becomes the wallpaper, which restarts WallpaperAgent once.
+    func apply(_ rules: WallpaperRules) async {
         working = true
         defer { working = false }
-        if plugIn != .enabled { await repairPlugIn() }
-        guard plugIn == .enabled else {
-            lastError = "macOS has Kinora's wallpaper plug-in switched off, so it can't show wallpapers yet."
-            return
-        }
-        let configuration = ChoiceConfiguration(wallpaper: item.id).encoded()
         do {
-            try store.apply { WallpaperStoreEditor.selectingKinora($0, configuration: configuration, now: Date()) }
-            await WallpaperAgentControl.reload()
+            try FileManager.default.createDirectory(at: location.root, withIntermediateDirectories: true)
+            try KinoraSelection(rules: rules).encoded().write(to: location.selection, options: .atomic)
+            LibraryModel.postLibraryChanged()
+            if !followsSelection {
+                if plugIn != .enabled { await repairPlugIn() }
+                guard plugIn == .enabled else {
+                    lastError = "macOS has Kinora's wallpaper plug-in switched off, so it can't show wallpapers yet."
+                    return
+                }
+                let configuration = ChoiceConfiguration(wallpaper: rules.wallpaper, followsKinora: true).encoded()
+                try store.apply { WallpaperStoreEditor.selectingKinora($0, configuration: configuration, now: Date()) }
+                await WallpaperAgentControl.reload()
+            }
         } catch {
             lastError = Self.describe(error)
         }
         refresh()
+    }
+
+    /// Edits the live selection's rules in place, for variants and rotations.
+    func change(_ edit: (inout WallpaperRules) -> Void) async {
+        guard var rules = selection?.rules else { return }
+        edit(&rules)
+        await apply(rules)
     }
 
     func restoreOriginal() async {

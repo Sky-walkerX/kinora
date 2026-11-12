@@ -31,6 +31,7 @@ struct KinoraApp: App {
     @State private var library = LibraryModel()
     @State private var wallpaper = WallpaperController()
     @State private var energy = EnergyMonitor()
+    @State private var settings = SettingsModel()
 
     var body: some Scene {
         Window("Kinora", id: "library") {
@@ -54,6 +55,10 @@ struct KinoraApp: App {
                 }
         }
         .defaultSize(width: 980, height: 620)
+
+        Settings {
+            SettingsView().environment(settings)
+        }
         .commands {
             CommandGroup(replacing: .newItem) {}
         }

@@ -148,7 +148,10 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
             return
         }
         // A newly shown wallpaper plays for a moment before resting, as after an unlock.
-        if record.surface.itemID != item.id, !record.isPreview { records[id]?.unlockedAt = Date() }
+        if record.surface.itemID != item.id, !record.isPreview {
+            records[id]?.unlockedAt = Date()
+            log.notice("surface \(id, privacy: .public) shows \(item.id.uuidString, privacy: .public) (\(String(describing: record.presentation), privacy: .public))")
+        }
         record.surface.show(itemID: item.id, media: location.mediaURL(for: item), thumbnail: location.thumbnailURL(for: item),
                             frameCap: conditions.onBattery ? settings.batteryFrameCap : nil)
     }
