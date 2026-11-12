@@ -54,7 +54,10 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let raw = try? decoder.decode(LossyIndex.self, from: data) else { return nil }
-        var index = LibraryIndex(items: raw.items.compactMap(\.value))
+        // An item naming a path instead of a file in the library folder is dropped, so a damaged
+        // or tampered index cannot point Kinora at files outside the library.
+        let items = raw.items.compactMap(\.value).filter { isPlainFileName($0.media) && isPlainFileName($0.thumbnail) }
+        var index = LibraryIndex(items: items)
         index.version = raw.version
         return index
     }
@@ -68,6 +71,11 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
         var value: T?
         init(from decoder: Decoder) throws { value = try? T(from: decoder) }
     }
+}
+
+/// True for a single file name: not empty, no path separators, not "." or "..".
+public func isPlainFileName(_ name: String) -> Bool {
+    !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\0") && !name.hasPrefix("~")
 }
 
 /// Where the library lives. The sandboxed plug-in reads it through a home-relative exception,

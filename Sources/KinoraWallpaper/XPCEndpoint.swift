@@ -20,6 +20,9 @@ final class XPCEndpoint: NSObject, KinoraWallpaperXPC, @unchecked Sendable {
     private var connections: [NSXPCConnection] = []
 
     func accept(_ connection: NSXPCConnection) -> Bool {
+        // Only Apple's own code hosts wallpaper plug-ins: WallpaperAgent, and possibly System
+        // Settings' wallpaper pane. Messages from anything else are refused.
+        connection.setCodeSigningRequirement("anchor apple")
         connection.exportedInterface = NSXPCInterface(with: KinoraWallpaperXPC.self)
         connection.exportedObject = self
         connection.remoteObjectInterface = NSXPCInterface(with: KinoraWallpaperHostXPC.self)

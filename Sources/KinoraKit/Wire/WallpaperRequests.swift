@@ -39,11 +39,18 @@ public struct WallpaperDestination: Equatable, Sendable {
         self.directDisplayID = directDisplayID
     }
 
-    /// The surface's size in pixels, or nil when the request did not say.
+    /// The largest surface side Kinora draws, in pixels. Far beyond any display, and small
+    /// enough that a corrupt request cannot make Kinora allocate gigabytes or trap.
+    public static let maxPixelSide = 16_384
+
+    /// The surface's size in pixels, or nil when the request did not say or made no sense.
     public var pixelSize: (width: Int, height: Int)? {
-        guard let size, size.width > 0, size.height > 0 else { return nil }
-        let scale = max(1, scaleFactor ?? 1)
-        return (Int((size.width * scale).rounded()), Int((size.height * scale).rounded()))
+        guard let size, size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
+        let scale = min(8, max(1, (scaleFactor ?? 1).isFinite ? (scaleFactor ?? 1) : 1))
+        let limit = Double(Self.maxPixelSide)
+        let width = min(limit, max(1, (size.width * scale).rounded()))
+        let height = min(limit, max(1, (size.height * scale).rounded()))
+        return (Int(width), Int(height))
     }
 }
 

@@ -74,3 +74,23 @@ import Testing
         #expect(WallpaperRequestDecoding.wallpaperID(from: Data(#"{"id":""}"#.utf8)) == nil)
     }
 }
+
+@Suite struct DestinationSafetyTests {
+    @Test func absurdSizesAreClampedNotTrapped() {
+        let huge = WallpaperDestination(size: CGSize(width: 1e300, height: 1e300), scaleFactor: 1e300)
+        #expect(huge.pixelSize?.width == WallpaperDestination.maxPixelSide)
+        #expect(huge.pixelSize?.height == WallpaperDestination.maxPixelSide)
+    }
+
+    @Test func nonFiniteValuesAreRejectedOrIgnored() {
+        #expect(WallpaperDestination(size: CGSize(width: CGFloat.nan, height: 900)).pixelSize == nil)
+        #expect(WallpaperDestination(size: CGSize(width: CGFloat.infinity, height: 900)).pixelSize == nil)
+        let badScale = WallpaperDestination(size: CGSize(width: 100, height: 50), scaleFactor: Double.nan)
+        #expect(badScale.pixelSize?.width == 100)
+    }
+
+    @Test func zeroOrNegativeSizesHaveNoPixels() {
+        #expect(WallpaperDestination(size: CGSize(width: 0, height: 900)).pixelSize == nil)
+        #expect(WallpaperDestination(size: CGSize(width: -5, height: 900)).pixelSize == nil)
+    }
+}

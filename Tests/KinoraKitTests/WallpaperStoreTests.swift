@@ -169,3 +169,21 @@ enum StoreFixtures {
         #expect(!realHomeDirectory().path.contains("/Containers/"))
     }
 }
+
+@Suite struct LibrarySafetyTests {
+    @Test func dropsItemsThatNamePathsInsteadOfFiles() throws {
+        func item(_ media: String, _ thumb: String) -> String {
+            #"{"id":"\#(UUID().uuidString)","name":"x","kind":"video","media":"\#(media)","thumbnail":"\#(thumb)","addedAt":"2026-11-12T10:00:00Z"}"#
+        }
+        let json = #"{"version":1,"items":[\#(item("ok.mov", "ok.png")),\#(item("../../.ssh/id_rsa", "a.png")),\#(item("a.mov", "/etc/passwd")),\#(item("..", "a.png")),\#(item("", "a.png"))]}"#
+        let index = try #require(LibraryIndex.decode(Data(json.utf8)))
+        #expect(index.items.map(\.media) == ["ok.mov"])
+    }
+
+    @Test func plainFileNames() {
+        #expect(isPlainFileName("6F1C0C1E.mov"))
+        #expect(!isPlainFileName("a/b.mov"))
+        #expect(!isPlainFileName(".."))
+        #expect(!isPlainFileName("~root"))
+    }
+}
