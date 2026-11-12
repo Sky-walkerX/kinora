@@ -1,0 +1,12 @@
+# Build output
+build/
+.build/
+*.xcarchive
+DerivedData/
+
+# macOS
+.DS_Store
+
+# Local signing material never belongs in git
+*.p12
+*.keychain-db
