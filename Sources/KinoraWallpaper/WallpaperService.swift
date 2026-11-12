@@ -18,6 +18,7 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
         let configuration: ChoiceConfiguration?
         var presentation: PresentationMode
         var activity: ActivityState
+        var appearance: SystemAppearance
         var destination: WallpaperDestination
         let isPreview: Bool
         var unlockedAt: Date?
@@ -26,7 +27,11 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
     private let location = LibraryLocation.current
     private var records: [String: Record] = [:]
     private var library = LibraryIndex()
+    private var selection: KinoraSelection?
     private var settings = PlaybackSettings()
+    /// Unlocks seen since the plug-in started, for rotations that step on every unlock.
+    private var unlockCount = 0
+    private var changeTimer: Timer?
     private let conditions = SystemConditions()
     private var settleTimer: Timer?
     private var notifyToken: Int32 = NOTIFY_TOKEN_INVALID
@@ -55,8 +60,10 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
             return nil
         }
         let configuration = ChoiceConfiguration.decode(request.configuration)
+        // A wallpaper just picked plays for a moment before resting, as after an unlock.
         records[id] = Record(surface: surface, configuration: configuration, presentation: request.presentationMode,
-                             activity: request.activityState, destination: request.destination, isPreview: request.isPreview)
+                             activity: request.activityState, appearance: request.systemAppearance,
+                             destination: request.destination, isPreview: request.isPreview, unlockedAt: Date())
         showContent(for: id)
         reevaluate()
         log.notice("acquire \(id, privacy: .public) preview=\(request.isPreview) mode=\(String(describing: request.presentationMode), privacy: .public) context=\(surface.contextID)")
@@ -65,16 +72,20 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
 
     func update(id: String, request: WallpaperUpdateRequest) -> Bool {
         guard var record = records[id] else { return false }
-        if record.presentation == .locked, request.presentationMode == .default { record.unlockedAt = Date() }
-        let presentationChanged = record.presentation != request.presentationMode
+        if record.presentation == .locked, request.presentationMode == .default {
+            record.unlockedAt = Date()
+            unlockCount += 1
+        }
+        let contentMayChange = record.presentation != request.presentationMode || record.appearance != request.systemAppearance
         record.presentation = request.presentationMode
         record.activity = request.activityState
+        record.appearance = request.systemAppearance
         if record.destination != request.destination {
             record.destination = request.destination
             record.surface.resize(to: request.destination)
         }
         records[id] = record
-        if presentationChanged { showContent(for: id) }
+        if contentMayChange { refreshContent() }
         reevaluate()
         log.notice("update \(id, privacy: .public) mode=\(String(describing: request.presentationMode), privacy: .public) activity=\(String(describing: request.activityState), privacy: .public)")
         return true
@@ -102,22 +113,42 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
 
     private func reloadLibrary() {
         if let data = try? Data(contentsOf: location.index), let index = LibraryIndex.decode(data) { library = index }
+        selection = (try? Data(contentsOf: location.selection)).flatMap(KinoraSelection.decode)
         if let data = try? Data(contentsOf: location.settings), let decoded = try? JSONDecoder().decode(PlaybackSettings.self, from: data) {
             settings = decoded
         }
-        for id in records.keys { showContent(for: id) }
+        refreshContent()
         reevaluate()
     }
 
-    /// Points a surface at the library item its choice names for its presentation mode. A
-    /// preview carries no configuration, so it shows the first item.
+    /// Points every surface at the item its rules name now, and arms one timer for the next
+    /// scheduled or rotating change.
+    private func refreshContent() {
+        for id in records.keys { showContent(for: id) }
+        let now = Date()
+        let next = records.values.compactMap { $0.configuration?.rules(selection: selection).nextChange(after: now) }.min()
+        changeTimer?.invalidate()
+        changeTimer = next.map { date in
+            Timer.scheduledTimer(withTimeInterval: max(1, date.timeIntervalSinceNow + 0.5), repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshContent() }
+            }
+        }
+    }
+
+    /// Points a surface at the library item its rules name now. A preview carries no
+    /// configuration, so it shows Kinora's current selection, or the first item.
     private func showContent(for id: String) {
         guard let record = records[id] else { return }
-        let wanted = record.configuration?.item(for: record.presentation) ?? (record.isPreview ? library.items.first?.id : nil)
-        guard let itemID = wanted, let item = library.item(itemID) else {
-            log.error("surface \(id, privacy: .public) names an item that is not in the library")
+        let rules = record.configuration?.rules(selection: selection) ?? selection?.rules
+        let wanted = rules?.item(for: record.presentation, appearance: record.appearance, at: Date(), unlockCount: unlockCount)
+        // An item deleted from the library falls back to the rules' main wallpaper, then any item.
+        guard let item = wanted.flatMap(library.item) ?? rules.flatMap({ library.item($0.wallpaper) })
+            ?? (record.isPreview ? library.items.first : nil) else {
+            log.error("surface \(id, privacy: .public) names no item that is in the library")
             return
         }
+        // A newly shown wallpaper plays for a moment before resting, as after an unlock.
+        if record.surface.itemID != item.id, !record.isPreview { records[id]?.unlockedAt = Date() }
         record.surface.show(itemID: item.id, media: location.mediaURL(for: item), thumbnail: location.thumbnailURL(for: item),
                             frameCap: conditions.onBattery ? settings.batteryFrameCap : nil)
     }
@@ -142,7 +173,8 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
                 if settle > Date() { nextSettle = min(nextSettle ?? settle, settle) }
             }
         }
-        conditions.watchCoverage(anyDesktop && settings.pauseWhenCovered)
+        // Coverage matters both for pausing when covered and for waking a resting wallpaper.
+        conditions.watchCoverage(anyDesktop && (settings.pauseWhenCovered || settings.settleAfterUnlock))
         settleTimer?.invalidate()
         settleTimer = nextSettle.map { date in
             Timer.scheduledTimer(withTimeInterval: date.timeIntervalSinceNow + 0.05, repeats: false) { [weak self] _ in
