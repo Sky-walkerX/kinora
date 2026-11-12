@@ -48,15 +48,22 @@ let softMask = mask.applyingFilter("CIMorphologyMinimum", parameters: ["inputRad
 png(softMask, "mask.png")
 
 // 3. Background with the subject's place filled: grow the mask, put a heavy blur of the photo there.
-let grown = mask.applyingFilter("CIMorphologyMaximum", parameters: ["inputRadius": canvas.width * 0.012])
+let grown = mask.applyingFilter("CIMorphologyMaximum", parameters: ["inputRadius": canvas.width * 0.008])
     .clampedToExtent().applyingGaussianBlur(sigma: canvas.width * 0.006).cropped(to: canvas)
-// Normalized convolution: blur(photo x keep) / blur(keep), so the hole takes only the colours around it.
-let keep = grown.applyingFilter("CIColorInvert")
+// The hard hole excludes every subject pixel from the colour sampling; the soft "grown" mask is only
+// for the final blend. Normalized convolution: blur(photo x keep) / blur(keep).
+let hardHole = mask.applyingFilter("CIMorphologyMaximum", parameters: ["inputRadius": canvas.width * 0.010])
+    .applyingFilter("CIColorThreshold", parameters: ["inputThreshold": 0.25])
+let keep = hardHole.applyingFilter("CIColorInvert")
 let kept = photo.applyingFilter("CIMultiplyCompositing", parameters: ["inputBackgroundImage": keep])
 // Fill at three scales: nearby pixels win where they reach, the wide blur only fills what is left.
+// Blur sideways only, so the gap takes colour from the background at the same height, not the sky.
+func sideways(_ image: CIImage, _ radius: Double) -> CIImage {
+    image.clampedToExtent().applyingFilter("CIMotionBlur", parameters: ["inputRadius": radius, "inputAngle": 0.0]).cropped(to: canvas)
+}
 func normalizedFill(_ sigma: Double) -> (fill: CIImage, confidence: CIImage) {
-    let numerator = kept.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: canvas)
-    let denominator = keep.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: canvas)
+    let numerator = sideways(kept, sigma * 2.5)
+    let denominator = sideways(keep, sigma * 2.5)
     let safe = denominator.applyingFilter("CIColorClamp", parameters: ["inputMinComponents": CIVector(x: 0.02, y: 0.02, z: 0.02, w: 1)])
     let fill = safe.applyingFilter("CIDivideBlendMode", parameters: ["inputBackgroundImage": numerator])
     // Confidence ramps from 0 at 15% coverage to 1 at 45%.
@@ -66,12 +73,64 @@ func normalizedFill(_ sigma: Double) -> (fill: CIImage, confidence: CIImage) {
     ]).applyingFilter("CIColorClamp")
     return (fill, confidence)
 }
-var fill = normalizedFill(canvas.width * 0.04).fill
+var fill = normalizedFill(canvas.width * 0.05).fill
 for sigma in [canvas.width * 0.015, canvas.width * 0.006] {
     let level = normalizedFill(sigma)
     fill = level.fill.applyingFilter("CIBlendWithMask", parameters: ["inputBackgroundImage": fill, "inputMaskImage": level.confidence])
 }
-let background = fill.applyingFilter("CIBlendWithMask", parameters: ["inputBackgroundImage": photo, "inputMaskImage": grown])
+// Soften the row-to-row streaks a sideways blur leaves.
+fill = fill.clampedToExtent().applyingGaussianBlur(sigma: canvas.width * 0.002).cropped(to: canvas)
+// Texture: the smooth fill gives colour and light; fine detail (photo minus its blur) is copied from
+// beside the subject as one coherent block, left half from the left and right half from the right,
+// with the seam between them feathered. The photo's own grain comes along, so the grain matches.
+func textured(_ smooth: CIImage) -> CIImage {
+    let w = Int(canvas.width), h = Int(canvas.height), sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+    func pixels(_ image: CIImage) -> [UInt8] {
+        var buffer = [UInt8](repeating: 0, count: w * h * 4)
+        context.render(image, toBitmap: &buffer, rowBytes: w * 4, bounds: canvas, format: .RGBA8, colorSpace: sRGB)
+        return buffer
+    }
+    let base = pixels(photo), soft = pixels(photo.clampedToExtent().applyingGaussianBlur(sigma: 2.5).cropped(to: canvas))
+    let flat = pixels(smooth), holeRGBA = pixels(hardHole)
+    var hole = [Bool](repeating: false, count: w * h)
+    var minX = w, maxX = -1
+    for i in 0..<(w * h) where holeRGBA[i * 4] > 32 {
+        hole[i] = true
+        let x = i % w; minX = min(minX, x); maxX = max(maxX, x)
+    }
+    guard maxX >= minX else { return smooth }
+    let span = maxX - minX + 1, seam = (minX + maxX) / 2, feather = max(8, span / 10), gap = 4
+    var out = flat
+    func detail(_ sx: Int, _ y: Int, _ c: Int) -> Int? {
+        guard sx >= 0, sx < w, !hole[y * w + sx] else { return nil }
+        let j = (y * w + sx) * 4 + c
+        return Int(base[j]) - Int(soft[j])
+    }
+    for y in 0..<h {
+        for x in minX...maxX where hole[y * w + x] {
+            let fromLeft = x - span - gap, fromRight = x + span + gap
+            // Weight of the left source: 1 well left of the seam, 0 well right, a ramp across it.
+            let t = min(1, max(0, Double(seam + feather - x) / Double(2 * feather)))
+            for c in 0..<3 {
+                let l = detail(fromLeft, y, c), r = detail(fromRight, y, c)
+                let d: Double = switch (l, r) {
+                case let (l?, r?): t * Double(l) + (1 - t) * Double(r)
+                case let (l?, nil): Double(l)
+                case let (nil, r?): Double(r)
+                default: 0
+                }
+                let j = (y * w + x) * 4 + c
+                out[j] = UInt8(max(0, min(255, Double(flat[j]) + d)))
+            }
+        }
+    }
+    return CIImage(bitmapData: Data(out), bytesPerRow: w * 4, size: canvas.size, format: .RGBA8, colorSpace: sRGB)
+}
+let textureStart = Date()
+let detailed = textured(fill)
+print("texture fill in \(String(format: "%.2f", Date().timeIntervalSince(textureStart)))s")
+let blendMask = hardHole.clampedToExtent().applyingGaussianBlur(sigma: 3).cropped(to: canvas)
+let background = detailed.applyingFilter("CIBlendWithMask", parameters: ["inputBackgroundImage": photo, "inputMaskImage": blendMask])
 let subject = photo.applyingFilter("CIBlendWithMask", parameters: ["inputBackgroundImage": CIImage.empty(), "inputMaskImage": softMask])
 png(background, "background.png")
 
@@ -109,9 +168,9 @@ func layer(_ image: CIImage, scale: Double, dx: Double, dy: Double) -> CIImage {
 let outRect = CGRect(x: center.x - outW / 2, y: center.y - outH / 2, width: outW, height: outH)
 func frame(_ t: Double) -> CIImage {
     let a = 2 * Double.pi * t
-    let dx = 0.011 * outW * sin(a), dy = 0.006 * outH * sin(2 * a)
-    let bg = layer(background, scale: 1.0 + 0.008 * sin(a), dx: 0.4 * dx, dy: 0.4 * dy)
-    let fg = layer(subject, scale: 1.0 + 0.016 * sin(a), dx: dx, dy: dy)
+    let dx = 0.0075 * outW * sin(a), dy = 0.004 * outH * sin(2 * a)
+    let bg = layer(background, scale: 1.0 + 0.006 * sin(a), dx: 0.45 * dx, dy: 0.45 * dy)
+    let fg = layer(subject, scale: 1.0 + 0.011 * sin(a), dx: dx, dy: dy)
     return fg.composited(over: bg).cropped(to: outRect).transformed(by: CGAffineTransform(translationX: -outRect.minX, y: -outRect.minY))
 }
 png(frame(0), "frame-000.png"); png(frame(0.25), "frame-025.png")
