@@ -96,8 +96,9 @@ enum PlugInRegistration {
         guard let line = output.split(separator: "\n").first(where: { $0.contains(KinoraIdentity.wallpaperBundleID) }) else {
             return .missing
         }
-        // pluginkit prefixes an elected plug-in with "+" and a rejected one with "-".
-        return line.trimmingCharacters(in: .whitespaces).hasPrefix("-") ? .disabled : .enabled
+        // pluginkit marks a plug-in switched on with "+" and one switched off with "-". With no
+        // mark macOS has not decided, and WallpaperAgent will not use it, so that counts as off.
+        return line.trimmingCharacters(in: .whitespaces).hasPrefix("+") ? .enabled : .disabled
     }
 
     static func repair() -> WallpaperController.PlugInState {
