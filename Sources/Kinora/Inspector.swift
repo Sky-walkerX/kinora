@@ -16,7 +16,6 @@ struct Inspector: View {
             if let item {
                 Section {
                     Thumbnail(url: library.thumbnailURL(item))
-                        .aspectRatio(16 / 10, contentMode: .fit)
                         .clipShape(.rect(cornerRadius: 10))
                         .listRowInsets(EdgeInsets())
                     Text(item.name).font(.headline)

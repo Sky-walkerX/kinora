@@ -153,7 +153,6 @@ struct LibraryTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Thumbnail(url: thumbnail)
-                .aspectRatio(16 / 10, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 10))
                 .overlay {
                     RoundedRectangle(cornerRadius: 10)
@@ -182,15 +181,23 @@ struct LibraryTile: View {
     }
 }
 
+/// A wallpaper's still in a fixed 16:10 frame, filled and cropped, so every tile lines up
+/// whatever the video's shape.
 struct Thumbnail: View {
     let url: URL
 
     var body: some View {
-        if let image = NSImage(contentsOf: url) {
-            Image(nsImage: image).resizable().scaledToFill()
-        } else {
-            Rectangle().fill(.quaternary).overlay { Image(systemName: "film").foregroundStyle(.secondary) }
-        }
+        Rectangle()
+            .fill(.quaternary)
+            .aspectRatio(16 / 10, contentMode: .fit)
+            .overlay {
+                if let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "film").foregroundStyle(.secondary)
+                }
+            }
+            .clipped()
     }
 }
 
