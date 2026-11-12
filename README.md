@@ -4,6 +4,8 @@ Live wallpapers for your Mac, on the desktop and on the Lock Screen. Free and op
 
 > **Status:** early development. There is no release yet.
 
+For current implementation status, remaining work and a copyable cloud continuation prompt, see [the development handoff](docs/HANDOFF.md). Living Photos currently exists as a prototype; it is not integrated into the app.
+
 ## What it does
 
 - Plays video and animated wallpapers on the desktop, the Lock Screen and the screen saver, on every display.
