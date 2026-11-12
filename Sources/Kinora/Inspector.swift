@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 The Kinora Contributors
+
+import KinoraKit
+import SwiftUI
+
+/// The selected wallpaper, what Kinora is doing, and what it costs.
+struct Inspector: View {
+    @Environment(LibraryModel.self) private var library
+    @Environment(WallpaperController.self) private var wallpaper
+    @Environment(EnergyMonitor.self) private var energy
+    let item: LibraryItem?
+
+    var body: some View {
+        Form {
+            if let item {
+                Section {
+                    Thumbnail(url: library.thumbnailURL(item))
+                        .aspectRatio(16 / 10, contentMode: .fit)
+                        .clipShape(.rect(cornerRadius: 10))
+                        .listRowInsets(EdgeInsets())
+                    Text(item.name).font(.headline)
+                    if wallpaper.currentItem == item.id {
+                        Label("On your desktop and Lock Screen", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button {
+                            Task { await wallpaper.use(item) }
+                        } label: {
+                            Label("Use as Wallpaper", systemImage: "photo.on.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.large)
+                        .disabled(wallpaper.working)
+                    }
+                }
+            }
+
+            Section("Status") {
+                plugInRow
+                wallpaperRow
+                energyRow
+            }
+
+            if wallpaper.canRestore {
+                Section {
+                    Button("Restore Original Wallpaper") { Task { await wallpaper.restoreOriginal() } }
+                        .disabled(wallpaper.working)
+                } footer: {
+                    Text("Puts back the wallpaper you had before Kinora.")
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var plugInRow: some View {
+        LabeledContent("Wallpaper plug-in") {
+            switch wallpaper.plugIn {
+            case .enabled:
+                StatusText("Ready", color: .green)
+            case .disabled, .missing:
+                HStack {
+                    StatusText(wallpaper.plugIn == .missing ? "Not registered" : "Switched off", color: .orange)
+                    Button("Turn On") { Task { await wallpaper.repairPlugIn() } }
+                }
+            case .unknown:
+                ProgressView().controlSize(.small)
+            }
+        }
+    }
+
+    private var wallpaperRow: some View {
+        LabeledContent("Current wallpaper") {
+            if let current = wallpaper.currentItem {
+                Text(library.items.first { $0.id == current }?.name ?? "Kinora")
+            } else if wallpaper.replacedByOther {
+                Text("Another wallpaper").foregroundStyle(.secondary)
+            } else {
+                Text("Not Kinora").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var energyRow: some View {
+        LabeledContent {
+            if let reading = energy.reading {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(reading.cpuPercent, format: .number.precision(.fractionLength(1)))% CPU")
+                    if let mw = reading.milliwatts {
+                        Text("\(mw, format: .number.precision(.fractionLength(0))) mW").foregroundStyle(.secondary)
+                    }
+                }
+                .monospacedDigit()
+            } else {
+                Text(energy.running ? "Measuring…" : "Not running").foregroundStyle(.secondary)
+            }
+        } label: {
+            Text("Energy")
+            Text("What the wallpaper costs right now, measured on the plug-in that draws it.")
+        }
+    }
+}
+
+private struct StatusText: View {
+    let text: String
+    let color: Color
+
+    init(_ text: String, color: Color) {
+        self.text = text
+        self.color = color
+    }
+
+    var body: some View {
+        Label {
+            Text(text)
+        } icon: {
+            Circle().fill(color).frame(width: 8, height: 8)
+        }
+    }
+}
