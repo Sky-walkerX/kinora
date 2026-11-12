@@ -21,12 +21,14 @@ final class XPCEndpoint: NSObject, KinoraWallpaperXPC, @unchecked Sendable {
     private var connections: [NSXPCConnection] = []
 
     func accept(_ connection: NSXPCConnection) -> Bool {
-        // Only Apple's own code hosts wallpaper plug-ins. ExtensionKit already enforces that: the
-        // plug-in point admits only hosts with Apple's private extension-host entitlement. As a
-        // second check, refuse a peer proven not to be Apple-signed. (NSXPCConnection's
-        // setCodeSigningRequirement crashes on these BoardServices-brokered connections.)
-        if Self.peerSignature(of: connection) == .notApple {
-            log.error("refused a connection from pid \(connection.processIdentifier): not signed by Apple")
+        // Only Apple's own code hosts wallpaper plug-ins. ExtensionKit enforces that too (the plug-in
+        // point admits only hosts with Apple's private extension-host entitlement); this check fails
+        // closed on top of it. NSXPCConnection's setCodeSigningRequirement and auditToken both need
+        // a libxpc connection these BoardServices-brokered connections don't have, so the peer is
+        // looked up by process ID, which cannot be reused while its connection is open.
+        let signature = Self.peerSignature(of: connection)
+        guard signature == .apple else {
+            log.error("refused a connection from pid \(connection.processIdentifier): signature \(String(describing: signature), privacy: .public)")
             return false
         }
         connection.exportedInterface = NSXPCInterface(with: KinoraWallpaperXPC.self)
@@ -38,14 +40,14 @@ final class XPCEndpoint: NSObject, KinoraWallpaperXPC, @unchecked Sendable {
         }
         lock.withLock { connections.append(connection) }
         connection.resume()
-        log.notice("host connected, pid \(connection.processIdentifier), signature \(String(describing: Self.peerSignature(of: connection)), privacy: .public)")
+        log.notice("host connected, pid \(connection.processIdentifier), signed by Apple")
         return true
     }
 
     enum PeerSignature { case apple, notApple, unknown }
 
-    /// Checks the connecting process's signature against "anchor apple". `unknown` when the
-    /// sandbox does not let the plug-in inspect its peer.
+    /// Checks the connecting process's signature against "anchor apple". `unknown` when the peer
+    /// cannot be inspected, which is refused like `notApple`.
     static func peerSignature(of connection: NSXPCConnection) -> PeerSignature {
         var code: SecCode?
         let attributes = [kSecGuestAttributePid: connection.processIdentifier] as CFDictionary
