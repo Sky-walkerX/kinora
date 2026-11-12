@@ -22,6 +22,47 @@ import Observation
     var lastError: String?
 
     private let store = WallpaperStoreFiles.current()
+    private var folderWatcher: DispatchSourceFileSystemObject?
+    private var fileWatcher: DispatchSourceFileSystemObject?
+    private var pendingRefresh: DispatchWorkItem?
+
+    /// Refreshes whenever anything writes the wallpaper store: System Settings, another app,
+    /// or Kinora itself. Writers either replace the file atomically, which changes the folder,
+    /// or rewrite it in place, which changes only the file, so both are watched.
+    func watchStore() {
+        guard folderWatcher == nil else { return }
+        folderWatcher = watch(store.storeFolder, events: [.write, .rename, .delete])
+        armFileWatcher()
+    }
+
+    private func armFileWatcher() {
+        fileWatcher?.cancel()
+        // An atomic replacement leaves this watcher on the old file, so it is re-armed every time.
+        fileWatcher = store.primaryFile.flatMap { watch($0, events: [.write, .extend, .rename, .delete, .attrib]) }
+    }
+
+    private func watch(_ url: URL, events: DispatchSource.FileSystemEvent) -> DispatchSourceFileSystemObject? {
+        let descriptor = open(url.path, O_EVTONLY)
+        guard descriptor >= 0 else { return nil }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: events, queue: .main)
+        source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.scheduleRefresh() } }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        return source
+    }
+
+    /// Writers touch the store several times per change; refresh once it settles.
+    private func scheduleRefresh() {
+        pendingRefresh?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.refresh()
+                self?.armFileWatcher()
+            }
+        }
+        pendingRefresh = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
 
     func refresh() {
         plugIn = PlugInRegistration.state()

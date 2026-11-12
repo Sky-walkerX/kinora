@@ -98,7 +98,7 @@ struct Inspector: View {
             }
         } label: {
             Text("Energy")
-            Text("What the wallpaper costs right now, measured on the plug-in that draws it.")
+            Text("What the plug-in that draws your wallpaper uses right now. Video decoding in the graphics hardware isn't included.")
         }
     }
 }

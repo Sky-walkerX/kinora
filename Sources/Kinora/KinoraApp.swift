@@ -44,6 +44,7 @@ struct KinoraApp: App {
                     let early = appDelegate.takePending()
                     if !early.isEmpty { await library.importVideos(early) }
                     wallpaper.refresh()
+                    wallpaper.watchStore()
                     await wallpaper.repairPlugIn()
                     energy.start()
                 }
