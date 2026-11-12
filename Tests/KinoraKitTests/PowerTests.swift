@@ -7,9 +7,13 @@ import Testing
 @testable import KinoraKit
 
 @Suite struct PlaybackPolicyTests {
-    let defaults = PlaybackSettings()
+    static var alwaysMoving: PlaybackSettings {
+        var settings = PlaybackSettings()
+        settings.settleAfterUnlock = false
+        return settings
+    }
 
-    func decide(_ change: (inout PlaybackConditions) -> Void, settings: PlaybackSettings = PlaybackSettings()) -> PlaybackDecision {
+    func decide(_ change: (inout PlaybackConditions) -> Void, settings: PlaybackSettings = Self.alwaysMoving) -> PlaybackDecision {
         var c = PlaybackConditions()
         change(&c)
         return PlaybackPolicy.decide(c, settings: settings)
@@ -32,7 +36,7 @@ import Testing
     @Test func capsTheFrameRateOnBattery() {
         #expect(decide { $0.onBattery = true } == .play(maxFramesPerSecond: 30))
         #expect(decide { $0.onBattery = true; $0.presentation = .locked } == .play(maxFramesPerSecond: 30))
-        var uncapped = PlaybackSettings(); uncapped.batteryFrameCap = nil
+        var uncapped = Self.alwaysMoving; uncapped.batteryFrameCap = nil
         #expect(decide({ $0.onBattery = true }, settings: uncapped) == .play(maxFramesPerSecond: nil))
     }
 
@@ -50,16 +54,21 @@ import Testing
         #expect(decide { $0.isPreview = true; $0.lowPowerMode = true; $0.desktopCoverage = 1 } == .play(maxFramesPerSecond: nil))
     }
 
-    @Test func appleStyleSettlesAfterUnlock() {
-        var apple = PlaybackSettings(); apple.settleAfterUnlock = true
-        #expect(decide({ $0.secondsSinceUnlock = 2 }, settings: apple) == .play(maxFramesPerSecond: nil))
-        #expect(decide({ $0.secondsSinceUnlock = 5 }, settings: apple) == .pause(.settled))
-        #expect(decide({ $0.secondsSinceUnlock = nil }, settings: apple) == .pause(.settled))
-        #expect(decide({ $0.presentation = .locked }, settings: apple) == .play(maxFramesPerSecond: nil))
+    @Test func restsWhileYouWorkByDefault() {
+        let rest = PlaybackSettings()
+        #expect(rest.settleAfterUnlock)
+        // Just unlocked or just picked: plays for a few seconds.
+        #expect(decide({ $0.secondsSinceUnlock = 2; $0.desktopCoverage = 0.5 }, settings: rest) == .play(maxFramesPerSecond: nil))
+        // Then rests while windows are up.
+        #expect(decide({ $0.secondsSinceUnlock = 5; $0.desktopCoverage = 0.5 }, settings: rest) == .pause(.settled))
+        #expect(decide({ $0.secondsSinceUnlock = nil; $0.desktopCoverage = 0.5 }, settings: rest) == .pause(.settled))
+        // Moves again when the desktop is clear, and always on the Lock Screen.
+        #expect(decide({ $0.secondsSinceUnlock = 60; $0.desktopCoverage = 0.02 }, settings: rest) == .play(maxFramesPerSecond: nil))
+        #expect(decide({ $0.presentation = .locked; $0.desktopCoverage = 0.5 }, settings: rest) == .play(maxFramesPerSecond: nil))
     }
 
     @Test func respectsSwitchedOffRules() {
-        var lenient = PlaybackSettings()
+        var lenient = Self.alwaysMoving
         lenient.pauseWhenCovered = false; lenient.pauseInLowPowerMode = false; lenient.pauseWhenHot = false
         #expect(decide({ $0.desktopCoverage = 1; $0.lowPowerMode = true; $0.thermal = .critical }, settings: lenient) == .play(maxFramesPerSecond: nil))
     }
@@ -71,6 +80,8 @@ import Testing
         #expect(partial.pauseInLowPowerMode)
         let empty = try JSONDecoder().decode(PlaybackSettings.self, from: Data("{}".utf8))
         #expect(empty == PlaybackSettings())
+        let clear = try JSONDecoder().decode(PlaybackSettings.self, from: Data(#"{"clearDesktopThreshold": 3}"#.utf8))
+        #expect(clear.clearDesktopThreshold == 0.5)
     }
 }
 

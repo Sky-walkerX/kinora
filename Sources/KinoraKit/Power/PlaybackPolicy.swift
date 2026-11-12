@@ -14,10 +14,13 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     public var pauseInLowPowerMode = true
     /// Pause at thermal state "serious" or worse.
     public var pauseWhenHot = true
-    /// Apple-style: play on the Lock Screen and for `settleDelay` seconds after unlock, then hold
-    /// a still frame on the desktop.
-    public var settleAfterUnlock = false
+    /// Battery-first, the default: the desktop "rests while you work". It plays on the Lock
+    /// Screen, for `settleDelay` seconds after unlock or after a wallpaper is picked, and whenever
+    /// the desktop is clear of windows; otherwise it holds a still frame, like Apple's aerials.
+    public var settleAfterUnlock = true
     public var settleDelay: TimeInterval = 5
+    /// At or below this coverage the desktop counts as clear, and a resting wallpaper moves.
+    public var clearDesktopThreshold = 0.05
 
     public init() {}
 
@@ -31,6 +34,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         pauseWhenHot = try c.decodeIfPresent(Bool.self, forKey: .pauseWhenHot) ?? d.pauseWhenHot
         settleAfterUnlock = try c.decodeIfPresent(Bool.self, forKey: .settleAfterUnlock) ?? d.settleAfterUnlock
         settleDelay = max(0, try c.decodeIfPresent(Double.self, forKey: .settleDelay) ?? d.settleDelay)
+        clearDesktopThreshold = min(0.5, max(0, try c.decodeIfPresent(Double.self, forKey: .clearDesktopThreshold) ?? d.clearDesktopThreshold))
     }
 }
 
@@ -76,7 +80,8 @@ public enum PlaybackPolicy {
         // The Lock Screen and the screen saver fill the display; windows do not cover them.
         if c.presentation != .default { return .play(maxFramesPerSecond: cap) }
         if settings.pauseWhenCovered, c.desktopCoverage >= settings.coveredThreshold { return .pause(.covered) }
-        if settings.settleAfterUnlock, (c.secondsSinceUnlock ?? .infinity) >= settings.settleDelay { return .pause(.settled) }
+        if settings.settleAfterUnlock, (c.secondsSinceUnlock ?? .infinity) >= settings.settleDelay,
+           c.desktopCoverage > settings.clearDesktopThreshold { return .pause(.settled) }
         return .play(maxFramesPerSecond: cap)
     }
 }
