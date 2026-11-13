@@ -30,7 +30,7 @@ All on `claude/gifted-darwin-0w9cpx`, one commit per increment, each built and t
 
 **Observed** on GitHub's `macos-26` runner (virtual Apple-silicon Mac, Swift 6.3.3, SDK 26.5), every increment:
 
-- `./build.sh test`: all tests pass, 140+ across KinoraKit and KinoraMedia (the KinoraKit subset also passes on Linux with Swift 6.3.3).
+- `./build.sh test`: all of about 160 tests pass across KinoraKit and KinoraMedia, with the two benchmarks run separately in a release build (the KinoraKit subset, 137 tests, also passes on Linux with Swift 6.3.3).
 - `./build.sh` (universal release build and bundle assembly, ad hoc signed): succeeds.
 - Living Photo pipeline end to end: synthetic photo, Vision found and lifted the subject, 30-frame loop of exact duration and size, last frame leads back to the first, cancellation removes partial output, non-photos refused, original untouched. Full-size release benchmark: 17.8–25.8 s for a 12 s 2940×1912 loop, 10.6 MB, 469–598 MB peak memory.
 - All four shaders compile and draw non-flat, moving, deterministic images; Live Sky darkens at night. GPU per frame on the virtual GPU: 0.9–11.6 ms, noisy between runners, Aurora the costliest ([details](BENCHMARKS.md)).
@@ -45,7 +45,7 @@ All on `claude/gifted-darwin-0w9cpx`, one commit per increment, each built and t
 - Real-Mac CPU, GPU, energy and memory for any new path; Living Photo quality on real photos.
 - Login item, update check against a real release, uninstall leaving no System Settings section, quarantined-download install.
 
-**Observed limitation: Shortcuts actions.** The release build runs Apple's App Intents metadata extractor only for the library modules ("Extracted no relevant App Intents symbols") and produces no `Metadata.appintents` for the app, so the four actions in `Intents.swift` will not appear in Shortcuts yet. The `kinora://` links work without it (Shortcuts' "Open URLs"). Fixing it needs either an Xcode project for the app target or running `appintentsmetadataprocessor` by hand in `build.sh` with the compiler's const-values output.
+**Observed limitation: Shortcuts actions.** The release build runs Apple's App Intents metadata extractor only for the library modules ("Extracted no relevant App Intents symbols") and produces no `Metadata.appintents` for the app, so the four actions in `Intents.swift` will not appear in Shortcuts yet. The `kinora://` links (Shortcuts' "Open URLs") don't depend on it, though they are untested on a Mac too. Fixing it needs either an Xcode project for the app target or running `appintentsmetadataprocessor` by hand in `build.sh` with the compiler's const-values output.
 
 ## Owner checklists
 
