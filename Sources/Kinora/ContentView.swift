@@ -71,11 +71,18 @@ struct ContentView: View {
             Button("OK") { library.lastError = nil; wallpaper.lastError = nil }
         } message: { Text($0) }
         .onChange(of: library.items) { _, items in
-            if selection == nil || !items.contains(where: { $0.id == selection }) {
-                selection = wallpaper.currentItem.flatMap { id in items.first { $0.id == id }?.id } ?? items.first?.id
-            }
+            let ids: [UUID] = items.map(\.id)
+            if let selection, ids.contains(selection) { return }
+            selection = Self.preferred(current: wallpaper.currentItem, among: ids)
         }
-        .onAppear { selection = wallpaper.currentItem ?? library.items.first?.id }
+        .onAppear { selection = Self.preferred(current: wallpaper.currentItem, among: library.items.map(\.id)) }
+    }
+
+    /// The current wallpaper when it is in the library, else the first item. Kept as plain
+    /// statements: Swift 6.3's type checker times out on the one-expression version.
+    private static func preferred(current: UUID?, among ids: [UUID]) -> UUID? {
+        if let current, ids.contains(current) { return current }
+        return ids.first
     }
 
     private func rotate(every interval: TimeInterval) async {
