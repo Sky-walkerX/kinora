@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 /// The sidebar's sections.
 enum SidebarItem: Hashable {
     case library
+    case livingPhotos
     case aerials
     case playlist(UUID)
 }
@@ -76,6 +77,8 @@ struct ContentView: View {
         switch section ?? .library {
         case .library:
             LibraryPage(selection: $selection, choosingFiles: $choosingFiles)
+        case .livingPhotos:
+            LivingPhotosPage(selection: $selection)
         case .aerials:
             AerialsPage(selection: $selection)
         case .playlist(let id):
@@ -115,6 +118,7 @@ struct Sidebar: View {
         List(selection: $section) {
             Section("Library") {
                 Label("Your Wallpapers", systemImage: "photo.on.rectangle").tag(SidebarItem.library)
+                Label("Living Photos", systemImage: "person.and.background.dotted").tag(SidebarItem.livingPhotos)
                 Label("Apple Aerials", systemImage: "airplane").tag(SidebarItem.aerials)
             }
             Section("Playlists") {

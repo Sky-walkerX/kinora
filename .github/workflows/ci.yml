@@ -36,3 +36,10 @@ jobs:
 
       - name: Build
         run: ./build.sh
+
+      # Generation cost on the CI runner, a virtual Mac. Not representative of a real Mac's
+      # GPU or encoder; it shows the pipeline works at full size and roughly what it costs.
+      - name: Living Photo benchmark (release)
+        env:
+          KINORA_BENCH: "1"
+        run: swift test -c release -Xswiftc -enable-testing --filter benchmark 2>&1 | grep -E "BENCH|passed|failed|error" || true
