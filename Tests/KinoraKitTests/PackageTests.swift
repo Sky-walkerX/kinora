@@ -197,3 +197,22 @@ import Testing
         #expect(PackageArchive.zipTotals("x files, y bytes uncompressed") == nil)
     }
 }
+
+@Suite struct ReleaseCheckTests {
+    func answer(_ fields: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: fields) }
+
+    @Test func offersOnlyNewerFinishedReleases() throws {
+        let page = "https://github.com/Sky-walkerX/kinora/releases/tag/v0.2.0"
+        #expect(ReleaseCheck.evaluate(try answer(["tag_name": "v0.2.0", "html_url": page]), current: "0.1.0")
+                == .available(version: "0.2.0", page: URL(string: page)!))
+        #expect(ReleaseCheck.evaluate(try answer(["tag_name": "v0.1.0"]), current: "0.1.0") == .upToDate)
+        #expect(ReleaseCheck.evaluate(try answer(["tag_name": "v0.3.0", "prerelease": true]), current: "0.1.0") == .upToDate)
+        #expect(ReleaseCheck.evaluate(try answer(["tag_name": "nightly"]), current: "0.1.0") == .unreadable)
+        #expect(ReleaseCheck.evaluate(Data("<html>".utf8), current: "0.1.0") == .unreadable)
+    }
+
+    @Test func neverLinksAnywhereElse() throws {
+        let outcome = ReleaseCheck.evaluate(try answer(["tag_name": "v9.0", "html_url": "https://evil.example/kinora.zip"]), current: "0.1.0")
+        #expect(outcome == .available(version: "9.0", page: ReleaseCheck.releasesPage))
+    }
+}

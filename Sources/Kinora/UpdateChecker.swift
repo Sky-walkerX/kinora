@@ -21,7 +21,7 @@ import Observation
     private(set) var state: State = .idle
 
     nonisolated static let latestRelease = URL(string: "https://api.github.com/repos/Sky-walkerX/kinora/releases/latest")!
-    nonisolated static let releasesPage = URL(string: "https://github.com/Sky-walkerX/kinora/releases")!
+    nonisolated static let releasesPage = ReleaseCheck.releasesPage
     static let automaticKey = "checkForUpdatesAutomatically"
     static let lastCheckKey = "lastUpdateCheck"
 
@@ -53,17 +53,10 @@ import Observation
 
     /// The state for a GitHub "latest release" response.
     nonisolated static func evaluate(_ data: Data, current: String) -> State {
-        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let tag = object["tag_name"] as? String else { return .failed }
-        let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-        guard let latest = Version(version), let installed = Version(current) else { return .failed }
-        guard latest > installed else { return .upToDate }
-        // Only ever send the user to Kinora's own release pages.
-        var page = releasesPage
-        if let text = object["html_url"] as? String, let url = URL(string: text),
-           url.scheme == "https", url.host == "github.com", url.path.hasPrefix("/Sky-walkerX/kinora/") {
-            page = url
+        switch ReleaseCheck.evaluate(data, current: current) {
+        case .upToDate: .upToDate
+        case let .available(version, page): .available(version: version, page: page)
+        case .unreadable: .failed
         }
-        return .available(version: version, page: page)
     }
 }

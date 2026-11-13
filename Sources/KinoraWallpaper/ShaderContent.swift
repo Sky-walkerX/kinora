@@ -29,6 +29,9 @@ import QuartzCore
     private var motionTime: Double
     private var runStarted: CFTimeInterval?
     private let inFlight = InFlight()
+    /// Set when WallpaperAgent stopped taking frames (a drawable took too long to arrive), so
+    /// the plug-in backs off instead of stalling its main thread on every frame.
+    private var backOffUntil: CFTimeInterval = 0
 
     init?(original: KinoraOriginal, renderer: OriginalRenderer, settings: PlaybackSettings, location: ApproximateLocation.Coordinates) {
         // Fail here, not on the first frame, when the shader cannot be built.
@@ -118,8 +121,14 @@ import QuartzCore
     private func draw() {
         // Skip a frame rather than wait when the GPU is still busy with earlier ones: waiting
         // for a drawable would stall WallpaperAgent's calls on the main thread.
-        guard inFlight.begin() else { return }
-        guard let drawable = metalLayer.nextDrawable(), let commands = renderer.queue.makeCommandBuffer() else {
+        let asked = CACurrentMediaTime()
+        guard asked >= backOffUntil, inFlight.begin() else { return }
+        let drawable = metalLayer.nextDrawable()
+        if CACurrentMediaTime() - asked > 0.2 {
+            backOffUntil = CACurrentMediaTime() + 5
+            log.notice("original \(self.original.slug, privacy: .public) waited for a drawable; backing off for 5 s")
+        }
+        guard let drawable, let commands = renderer.queue.makeCommandBuffer() else {
             inFlight.end()
             return
         }
