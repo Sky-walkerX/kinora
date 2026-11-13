@@ -71,6 +71,12 @@ enum PackageInstaller {
 
     /// The folder holding `wallpaper.json`: the folder itself, or a zip extracted into `work`.
     static func packageRoot(for url: URL, work: URL) throws -> URL {
+        try root(for: url, work: work, manifests: [PackageManifest.fileName])
+    }
+
+    /// The folder holding one of `manifests`: the folder itself, or a zip measured and then
+    /// extracted into `work`, at its top level or in its only folder.
+    static func root(for url: URL, work: URL, manifests: [String]) throws -> URL {
         var isFolder: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { throw Failure.invalid(.noManifest) }
         if isFolder.boolValue { return url }
@@ -87,11 +93,14 @@ enum PackageInstaller {
                 throw Failure.invalid(.unsafeFile(entry.lastPathComponent))
             }
         }
-        if FileManager.default.fileExists(atPath: destination.appendingPathComponent(PackageManifest.fileName).path) { return destination }
+        func holdsManifest(_ folder: URL) -> Bool {
+            manifests.contains { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        }
+        if holdsManifest(destination) { return destination }
         let children = ((try? FileManager.default.contentsOfDirectory(atPath: destination.path)) ?? []).filter { $0 != "__MACOSX" }
         if children.count == 1 {
             let inner = destination.appendingPathComponent(children[0], isDirectory: true)
-            if FileManager.default.fileExists(atPath: inner.appendingPathComponent(PackageManifest.fileName).path) { return inner }
+            if holdsManifest(inner) { return inner }
         }
         throw Failure.invalid(.noManifest)
     }

@@ -39,7 +39,11 @@ import UniformTypeIdentifiers
         let display = VideoOptimizer.largestDisplayPixels()
         for url in files {
             do {
-                if Self.isImage(url) {
+                if let foreign = ForeignImporter.manifest(at: url) {
+                    items.append(try await ForeignImporter.importWallpaper(at: url, manifest: foreign, library: self, display: display))
+                } else if url.pathExtension.lowercased() == "gif" {
+                    items.append(try await ForeignImporter.importGIF(url, library: self, display: display, name: nil))
+                } else if Self.isImage(url) {
                     let location = location
                     items.append(try await Task.detached { try Self.makeStillItem(from: url, in: location, display: display) }.value)
                 } else if Self.isPackage(url) {
@@ -49,6 +53,8 @@ import UniformTypeIdentifiers
                 }
                 save()
             } catch let failure as PackageInstaller.Failure {
+                lastError = failure.errorDescription
+            } catch let failure as ForeignImporter.Failure {
                 lastError = failure.errorDescription
             } catch {
                 rejected.append(url.lastPathComponent)
@@ -213,7 +219,7 @@ import UniformTypeIdentifiers
         for url in urls {
             var isFolder: ObjCBool = false
             guard fm.fileExists(atPath: url.path, isDirectory: &isFolder) else { continue }
-            guard isFolder.boolValue, !isPackage(url) else { files.append(url); continue }
+            guard isFolder.boolValue, !isPackage(url), ForeignImporter.manifest(at: url) == nil else { files.append(url); continue }
             let keys: [URLResourceKey] = [.isRegularFileKey, .contentTypeKey]
             guard let walker = fm.enumerator(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             for case let file as URL in walker {
@@ -240,7 +246,7 @@ import UniformTypeIdentifiers
     /// `stem` names the files; a replacement uses a fresh one so nothing still showing the old
     /// file is pointed at a half-written one.
     static func makeItem(from source: URL, in location: LibraryLocation, display: CGSize, id: UUID = UUID(),
-                         stem: String? = nil, thumbnailName: String? = nil) async throws -> LibraryItem {
+                         stem: String? = nil, thumbnailName: String? = nil, optimize: Bool = true) async throws -> LibraryItem {
         let asset = AVURLAsset(url: source)
         guard try await asset.load(.isPlayable), try await !asset.loadTracks(withMediaType: .video).isEmpty else {
             throw CocoaError(.fileReadCorruptFile)
@@ -254,6 +260,8 @@ import UniformTypeIdentifiers
         let optimized = location.mediaFolder.appendingPathComponent("\(stem).mov")
         var media = optimized.lastPathComponent
         do {
+            // Video Kinora just encoded itself, such as a converted GIF, is not encoded twice.
+            guard optimize else { throw CancellationError() }
             try await VideoOptimizer.optimize(source, to: optimized, display: display)
             if !VideoOptimization.keepsOptimized(originalBytes: originalBytes, optimizedBytes: Self.fileSize(optimized)) {
                 throw CancellationError()
