@@ -58,6 +58,12 @@ import QuartzCore
         replace(with: VideoContent(itemID: itemID, media: media, thumbnail: thumbnail, frameCap: frameCap))
     }
 
+    /// Shows a still picture.
+    func showStill(itemID: UUID, media: URL) {
+        if let still = content as? StillContent, still.itemID == itemID, still.media == media { return }
+        replace(with: StillContent(itemID: itemID, media: media))
+    }
+
     /// Shows one of Kinora's originals. Returns false where Metal is unavailable.
     @discardableResult
     func showOriginal(_ original: KinoraOriginal, settings: PlaybackSettings, location: ApproximateLocation.Coordinates) -> Bool {
@@ -262,5 +268,57 @@ import QuartzCore
         playerLayer.opacity = 1
         still.opacity = 0
         CATransaction.commit()
+    }
+}
+
+/// A still picture. Costs nothing once drawn: no decoder, no timer.
+@MainActor final class StillContent: SurfaceContent {
+    let layer = CALayer()
+    let itemID: UUID
+    let media: URL
+    private var image: CGImage?
+    private var decodedSide = 0
+
+    init(itemID: UUID, media: URL) {
+        self.itemID = itemID
+        self.media = media
+        layer.contentsGravity = .resizeAspectFill
+        layer.masksToBounds = true
+    }
+
+    func resize(to size: CGSize, scale: CGFloat) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.frame = CGRect(origin: .zero, size: size)
+        layer.contentsScale = scale
+        // Decode once at the size shown, not at the file's full size.
+        let side = Int((max(size.width, size.height) * scale).rounded())
+        if image == nil || side > decodedSide {
+            image = Self.decode(media, maxSide: side)
+            decodedSide = side
+            layer.contents = image
+        }
+        CATransaction.commit()
+    }
+
+    func apply(_ decision: PlaybackDecision) {}
+
+    func snapshot(width: Int, height: Int) async -> IOSurfaceRef? {
+        guard let image = image ?? Self.decode(media, maxSide: max(width, height)) else { return nil }
+        return WallpaperSurface.surface(drawing: image, width: width, height: height)
+    }
+
+    func tearDown() {
+        layer.contents = nil
+        image = nil
+    }
+
+    static func decode(_ url: URL, maxSide: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(64, min(16_384, maxSide)),
+        ] as CFDictionary)
     }
 }

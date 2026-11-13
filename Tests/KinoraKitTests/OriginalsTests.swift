@@ -85,8 +85,8 @@ import Testing
     @Test func frameRateFollowsTheOriginalTheSettingAndTheBattery() throws {
         let aurora = try #require(KinoraOriginals.all.first { $0.slug == "aurora" })
         var settings = PlaybackSettings()
-        #expect(KinoraOriginals.framesPerSecond(for: aurora, settings: settings, cap: nil) == 30)
-        #expect(KinoraOriginals.framesPerSecond(for: aurora, settings: settings, cap: 24) == 24)
+        #expect(KinoraOriginals.framesPerSecond(for: aurora, settings: settings, cap: nil) == 24)
+        #expect(KinoraOriginals.framesPerSecond(for: aurora, settings: settings, cap: 20) == 20)
         settings.generativeFrameRate = 15
         #expect(KinoraOriginals.framesPerSecond(for: aurora, settings: settings, cap: nil) == 15)
     }

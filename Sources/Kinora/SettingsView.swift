@@ -34,6 +34,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(SettingsModel.self) private var settings
+    @AppStorage("showGallery") private var showGallery = true
 
     var body: some View {
         @Bindable var settings = settings
@@ -67,6 +68,14 @@ struct SettingsView: View {
                 Text("Motion")
             } footer: {
                 Text("Reduce Motion is in System Settings › Accessibility › Display. Paused wallpapers hold their current frame until you resume them.")
+            }
+
+            Section {
+                Toggle("Show the gallery", isOn: $showGallery)
+            } header: {
+                Text("Gallery")
+            } footer: {
+                Text("Kinora goes online only when you browse the gallery or download from it. It has no account, no analytics and no tracking.")
             }
         }
         .formStyle(.grouped)

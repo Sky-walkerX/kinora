@@ -181,8 +181,16 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
                 log.error("surface \(id, privacy: .public) cannot draw \(original.slug, privacy: .public) without Metal")
             }
         } else if let item = library.item(resolved) {
-            record.surface.showVideo(itemID: item.id, media: location.mediaURL(for: item), thumbnail: location.thumbnailURL(for: item),
-                                     frameCap: conditions.onBattery ? settings.batteryFrameCap : nil)
+            if let preset = item.preset, let tinted = preset.resolved(id: item.id, name: item.name) {
+                if !record.surface.showOriginal(tinted, settings: settings, location: skyLocation) {
+                    log.error("surface \(id, privacy: .public) cannot draw preset \(preset.base, privacy: .public) without Metal")
+                }
+            } else if item.isStill {
+                record.surface.showStill(itemID: item.id, media: location.mediaURL(for: item))
+            } else {
+                record.surface.showVideo(itemID: item.id, media: location.mediaURL(for: item), thumbnail: location.thumbnailURL(for: item),
+                                         frameCap: conditions.onBattery ? settings.batteryFrameCap : nil)
+            }
         }
     }
 

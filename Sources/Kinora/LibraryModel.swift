@@ -39,8 +39,17 @@ import UniformTypeIdentifiers
         let display = VideoOptimizer.largestDisplayPixels()
         for url in files {
             do {
-                items.append(try await Self.makeItem(from: url, in: location, display: display))
+                if Self.isImage(url) {
+                    let location = location
+                    items.append(try await Task.detached { try Self.makeStillItem(from: url, in: location, display: display) }.value)
+                } else if Self.isPackage(url) {
+                    _ = try await PackageInstaller.install(url, into: self)
+                } else {
+                    items.append(try await Self.makeItem(from: url, in: location, display: display))
+                }
                 save()
+            } catch let failure as PackageInstaller.Failure {
+                lastError = failure.errorDescription
             } catch {
                 rejected.append(url.lastPathComponent)
             }
@@ -186,20 +195,31 @@ import UniformTypeIdentifiers
         return folder
     }
 
-    /// Video files in `urls`, looking two folders deep into any folder.
+    nonisolated static func isImage(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.conforms(to: .image) == true
+            || ["heic", "jpg", "jpeg", "png", "tif", "tiff", "webp"].contains(url.pathExtension.lowercased())
+    }
+
+    /// A Kinora wallpaper package: a zip named `.kinorawallpaper`, or a folder holding `wallpaper.json`.
+    nonisolated static func isPackage(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "kinorawallpaper"
+            || FileManager.default.fileExists(atPath: url.appendingPathComponent(PackageManifest.fileName).path)
+    }
+
+    /// Videos, pictures and packages in `urls`, looking a few folders deep into any folder.
     nonisolated static func expandingFolders(_ urls: [URL]) -> [URL] {
         let fm = FileManager.default
         var files: [URL] = []
         for url in urls {
             var isFolder: ObjCBool = false
             guard fm.fileExists(atPath: url.path, isDirectory: &isFolder) else { continue }
-            guard isFolder.boolValue else { files.append(url); continue }
+            guard isFolder.boolValue, !isPackage(url) else { files.append(url); continue }
             let keys: [URLResourceKey] = [.isRegularFileKey, .contentTypeKey]
             guard let walker = fm.enumerator(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             for case let file as URL in walker {
                 if walker.level > 3 { walker.skipDescendants(); continue }
                 guard let values = try? file.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
-                      values.contentType?.conforms(to: .movie) == true else { continue }
+                      let type = values.contentType, type.conforms(to: .movie) || type.conforms(to: .image) else { continue }
                 files.append(file)
             }
         }
@@ -213,21 +233,25 @@ import UniformTypeIdentifiers
         if webm {
             return "Kinora can't play \(list). WebM and MKV videos aren't supported yet: macOS can't open them directly. Convert them to MP4 or MOV first."
         }
-        return "Kinora can't play \(list). Try an MP4 or MOV video."
+        return "Kinora can't play \(list). Try an MP4 or MOV video, or a JPEG, HEIC or PNG picture."
     }
 
-    private static func makeItem(from source: URL, in location: LibraryLocation, display: CGSize) async throws -> LibraryItem {
+    /// Imports a video: converted once for the display when that saves space, else copied.
+    /// `stem` names the files; a replacement uses a fresh one so nothing still showing the old
+    /// file is pointed at a half-written one.
+    static func makeItem(from source: URL, in location: LibraryLocation, display: CGSize, id: UUID = UUID(),
+                         stem: String? = nil, thumbnailName: String? = nil) async throws -> LibraryItem {
         let asset = AVURLAsset(url: source)
         guard try await asset.load(.isPlayable), try await !asset.loadTracks(withMediaType: .video).isEmpty else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        let id = UUID()
+        let stem = stem ?? id.uuidString
         let fm = FileManager.default
         try fm.createDirectory(at: location.mediaFolder, withIntermediateDirectories: true)
         try fm.createDirectory(at: location.thumbnailFolder, withIntermediateDirectories: true)
         let originalBytes = Self.fileSize(source)
         // Convert once for the displays it will play on; keep the original only when that is smaller.
-        let optimized = location.mediaFolder.appendingPathComponent("\(id.uuidString).mov")
+        let optimized = location.mediaFolder.appendingPathComponent("\(stem).mov")
         var media = optimized.lastPathComponent
         do {
             try await VideoOptimizer.optimize(source, to: optimized, display: display)
@@ -237,11 +261,11 @@ import UniformTypeIdentifiers
         } catch {
             try? fm.removeItem(at: optimized)
             let ext = source.pathExtension.isEmpty ? "mov" : source.pathExtension.lowercased()
-            media = "\(id.uuidString).\(ext)"
+            media = "\(stem).\(ext)"
             try fm.copyItem(at: source, to: location.mediaFolder.appendingPathComponent(media))
         }
         var item = LibraryItem(id: id, name: source.deletingPathExtension().lastPathComponent, kind: .video,
-                               media: media, thumbnail: "\(id.uuidString).png", addedAt: Date())
+                               media: media, thumbnail: thumbnailName ?? "\(stem).png", addedAt: Date())
         item.originalBytes = originalBytes
         item.storedBytes = Self.fileSize(location.mediaURL(for: item))
         do {
@@ -253,7 +277,74 @@ import UniformTypeIdentifiers
         return item
     }
 
-    private static func fileSize(_ url: URL) -> Int64 {
+    /// Imports a still picture: kept as it is when it suits the display, else stored once at
+    /// the display's size as HEIC. Shown without any video decoding.
+    nonisolated static func makeStillItem(from source: URL, in location: LibraryLocation, display: CGSize, id: UUID = UUID(),
+                                          stem: String? = nil, thumbnailName: String? = nil) throws -> LibraryItem {
+        guard let image = CGImageSourceCreateWithURL(source as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+              width > 0, height > 0, width * height <= 200_000_000 else { throw CocoaError(.fileReadCorruptFile) }
+        let fm = FileManager.default
+        try fm.createDirectory(at: location.mediaFolder, withIntermediateDirectories: true)
+        try fm.createDirectory(at: location.thumbnailFolder, withIntermediateDirectories: true)
+        let stem = stem ?? id.uuidString
+        let ext = source.pathExtension.lowercased()
+        let displaySide = max(display.width, display.height)
+        let originalBytes = fileSize(source)
+        var media = "\(stem).\(ext.isEmpty ? "jpg" : ext)"
+        if ["heic", "jpg", "jpeg", "png"].contains(ext), Double(max(width, height)) <= displaySide * 1.25 {
+            try fm.copyItem(at: source, to: location.mediaFolder.appendingPathComponent(media))
+        } else {
+            // Large or unusual pictures are stored once at the size shown.
+            guard let scaled = CGImageSourceCreateThumbnailAtIndex(image, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: Int(displaySide * 1.1),
+            ] as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
+            media = "\(stem).heic"
+            let url = location.mediaFolder.appendingPathComponent(media)
+            guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.heic.identifier as CFString, 1, nil) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            CGImageDestinationAddImage(destination, scaled, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+            guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+        }
+        var item = LibraryItem(id: id, name: source.deletingPathExtension().lastPathComponent, kind: .image, media: media,
+                               thumbnail: thumbnailName ?? "\(stem).png", addedAt: Date())
+        item.still = true
+        item.originalBytes = originalBytes
+        item.storedBytes = fileSize(location.mediaURL(for: item))
+        guard let thumb = CGImageSourceCreateThumbnailAtIndex(image, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1280,
+        ] as CFDictionary) else {
+            try? fm.removeItem(at: location.mediaURL(for: item))
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        try writePNG(thumb, to: location.thumbnailURL(for: item))
+        return item
+    }
+
+    nonisolated static func writePNG(_ image: CGImage, to url: URL) throws {
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+    }
+
+    /// Puts `new` where `old` was, keeping its place in the library, then deletes the old
+    /// item's files that the new one does not use.
+    func replace(_ old: LibraryItem, with new: LibraryItem) {
+        guard let index = items.firstIndex(where: { $0.id == old.id }) else { add(new); return }
+        items[index] = new
+        if old.media != new.media, let owned = location.ownedMediaURL(for: old) { try? FileManager.default.removeItem(at: owned) }
+        if old.thumbnail != new.thumbnail { try? FileManager.default.removeItem(at: location.thumbnailURL(for: old)) }
+        save()
+    }
+
+    nonisolated private static func fileSize(_ url: URL) -> Int64 {
         ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0
     }
 

@@ -24,6 +24,31 @@
 			<key>LSHandlerRank</key><string>Alternate</string>
 			<key>LSItemContentTypes</key><array><string>public.movie</string></array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>Kinora Wallpaper</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Owner</string>
+			<key>LSItemContentTypes</key><array><string>io.github.sky-walkerx.kinora.wallpaper-package</string></array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key><string>io.github.sky-walkerx.kinora.wallpaper-package</string>
+			<key>UTTypeDescription</key><string>Kinora Wallpaper</string>
+			<key>UTTypeConformsTo</key><array><string>public.zip-archive</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key><array><string>kinorawallpaper</string></array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key><string>io.github.sky-walkerx.kinora</string>
+			<key>CFBundleURLSchemes</key><array><string>kinora</string></array>
+		</dict>
 	</array>
 </dict>
 </plist>

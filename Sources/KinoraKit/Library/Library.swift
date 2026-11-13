@@ -27,6 +27,8 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
         public static let package = Kind(rawValue: "package")
         /// One of Kinora's built-in generative wallpapers. Never stored in the index.
         public static let original = Kind(rawValue: "original")
+        /// A still picture the user imported.
+        public static let image = Kind(rawValue: "image")
     }
 
     public var id: UUID
@@ -60,13 +62,23 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// False for media Kinora only points at, such as Apple's aerials. Kinora never deletes those.
-    public var ownsMedia: Bool { kind != .appleAerial && kind != .original }
+    public var ownsMedia: Bool { kind != .appleAerial && kind != .original && preset == nil }
 
     /// True for items the user may rename and remove.
     public var isEditable: Bool { kind != .original }
 
     /// Credit for content made by someone else, shown wherever the item is.
     public var attribution: Attribution?
+    /// The media is a still picture, shown without decoding any video.
+    public var still: Bool?
+    /// The item is one of Kinora's originals with its own colours, from a package.
+    public var preset: OriginalPreset?
+    /// The package it was installed from, so installing a newer version replaces it.
+    public var packageID: String?
+    public var packageVersion: String?
+
+    /// How the plug-in draws it.
+    public var isStill: Bool { still == true }
 
     public struct Attribution: Codable, Equatable, Sendable {
         public var author: String?

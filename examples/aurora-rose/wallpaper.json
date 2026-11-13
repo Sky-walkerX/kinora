@@ -1,0 +1,14 @@
+{
+  "format": "kinora.wallpaper",
+  "formatVersion": 1,
+  "id": "io.github.sky-walkerx.examples.aurora-rose",
+  "version": "1.0.0",
+  "name": "Aurora Rose",
+  "summary": "Kinora's Aurora in rose and violet.",
+  "author": { "name": "The Kinora Contributors", "url": "https://github.com/Sky-walkerX/kinora" },
+  "license": "CC0-1.0",
+  "type": "original",
+  "original": { "base": "aurora", "palette": [[0.98, 0.45, 0.62], [0.55, 0.32, 0.95], [0.03, 0.02, 0.07]] },
+  "compatibility": { "minimumKinora": "0.1.0" },
+  "tags": ["night", "aurora"]
+}

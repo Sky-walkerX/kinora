@@ -11,6 +11,7 @@ enum SidebarItem: Hashable {
     case livingPhotos
     case originals
     case aerials
+    case gallery
     case playlist(UUID)
 }
 
@@ -45,8 +46,8 @@ struct ContentView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("Add Videos", systemImage: "plus") { choosingFiles = true }
-                            .help("Add videos or folders of videos to your library")
+                        Button("Add Wallpapers", systemImage: "plus") { choosingFiles = true }
+                            .help("Add videos, pictures, wallpaper packages or folders of them to your library")
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Button("Inspector", systemImage: "sidebar.right") { showInspector.toggle() }
@@ -55,7 +56,7 @@ struct ContentView: View {
         }
         .navigationTitle("Kinora")
         .navigationSubtitle(subtitle)
-        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.movie, .folder], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.movie, .image, .folder, .kinoraPackage], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             Task {
                 let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
@@ -84,6 +85,8 @@ struct ContentView: View {
             OriginalsPage(selection: $selection)
         case .aerials:
             AerialsPage(selection: $selection)
+        case .gallery:
+            GalleryPage()
         case .playlist(let id):
             PlaylistPage(playlistID: id, selection: $selection, section: $section)
         }
@@ -114,6 +117,7 @@ struct Sidebar: View {
     @Environment(LibraryModel.self) private var library
     @Environment(WallpaperController.self) private var wallpaper
     @Binding var section: SidebarItem?
+    @AppStorage("showGallery") private var showGallery = true
     @State private var renaming: Playlist?
     @State private var newName = ""
 
@@ -124,6 +128,11 @@ struct Sidebar: View {
                 Label("Living Photos", systemImage: "person.and.background.dotted").tag(SidebarItem.livingPhotos)
                 Label("Kinora Originals", systemImage: "sparkles").tag(SidebarItem.originals)
                 Label("Apple Aerials", systemImage: "airplane").tag(SidebarItem.aerials)
+            }
+            if showGallery {
+                Section("Discover") {
+                    Label("Gallery", systemImage: "square.grid.2x2").tag(SidebarItem.gallery)
+                }
             }
             Section("Playlists") {
                 ForEach(library.playlists) { playlist in
@@ -174,4 +183,9 @@ private struct PlaylistRow: View {
         .badge(playlist.items.count)
         .accessibilityValue(isPlaying ? "Playing" : "")
     }
+}
+
+extension UTType {
+    /// A Kinora wallpaper package, a zip with a `.kinorawallpaper` extension (docs/FORMAT.md).
+    static let kinoraPackage = UTType(exportedAs: "io.github.sky-walkerx.kinora.wallpaper-package", conformingTo: .zip)
 }

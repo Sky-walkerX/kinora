@@ -45,7 +45,7 @@ public enum KinoraOriginals {
                        palette: [SIMD3(0.30, 0.52, 0.86), SIMD3(0.98, 0.62, 0.36), SIMD3(0.04, 0.05, 0.12)], usesSun: true),
         KinoraOriginal(id: UUID(uuidString: "6B1F7E2A-4C3D-4E8A-9A51-0D2C7B3E5A02")!, slug: "aurora", name: "Aurora",
                        summary: "Northern lights folding slowly over a starry sky.",
-                       framesPerSecond: 30, renderScale: 0.5,
+                       framesPerSecond: 24, renderScale: 0.45,
                        palette: [SIMD3(0.18, 0.95, 0.62), SIMD3(0.45, 0.30, 0.95), SIMD3(0.02, 0.03, 0.08)], usesSun: false),
         KinoraOriginal(id: UUID(uuidString: "6B1F7E2A-4C3D-4E8A-9A51-0D2C7B3E5A03")!, slug: "tide", name: "Tide",
                        summary: "Soft colour fields drifting into one another, like light on water.",

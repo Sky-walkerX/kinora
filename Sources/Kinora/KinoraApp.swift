@@ -32,6 +32,7 @@ struct KinoraApp: App {
     @State private var wallpaper = WallpaperController()
     @State private var energy = EnergyMonitor()
     @State private var settings = SettingsModel()
+    @State private var gallery = GalleryModel()
 
     var body: some Scene {
         Window("Kinora", id: "library") {
@@ -39,7 +40,8 @@ struct KinoraApp: App {
                 .environment(library)
                 .environment(wallpaper)
                 .environment(energy)
-                .frame(minWidth: 760, minHeight: 480)
+                .environment(gallery)
+                .frame(minWidth: 860, minHeight: 520)
                 .task {
                     appDelegate.openVideos = { urls in Task { await library.importVideos(urls) } }
                     let early = appDelegate.takePending()
