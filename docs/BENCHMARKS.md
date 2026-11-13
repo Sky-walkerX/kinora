@@ -23,16 +23,18 @@ Living Photo playback, originals and the current plug-in have **not** been measu
 
 ## Measured on GitHub's macOS 26 runner (virtual Mac, paravirtual GPU)
 
-These come from CI on 2026-11-13. The GPU and encoder are virtual, so they show the code works at full size and give an order of magnitude; they are not a real Mac's cost and must not be quoted as one.
+These come from CI on 2026-11-13. The GPU and encoder are virtual and shared, so they show the code works at full size and give an order of magnitude; they are not a real Mac's cost and must not be quoted as one. Two runners an hour apart differed by up to almost three times, so ranges are given.
 
 | What | Result |
 |---|---|
-| Living Photo, 4032×3024 photo → 2940×1912, 12 s at 30 fps, release build | subject found and lifted; prepare 2.8 s, render and encode 14.7 s, 17.8 s in all; HEVC, 10.6 MB; peak memory 469 MB |
+| Living Photo, 4032×3024 photo → 2940×1912, 12 s at 30 fps, release build | subject found and lifted; prepare 2.8–4.5 s, render and encode 14.7–21.1 s, 17.8–25.8 s in all; HEVC, 10.6 MB; peak memory 469–598 MB |
 | Living Photo, 480×300, 2 s at 15 fps, debug build | prepare 2.1 s, encode 2.6 s, 0.3 MB |
-| Live Sky at 1470×956 (half of 2940×1912), 20 fps | 1.6–4.0 ms GPU per frame (3–8% of the GPU's time) |
-| Aurora at 1470×956, measured at 30 fps | 4.1 ms per frame (12% at 30 fps); since lowered to 24 fps at 45% resolution |
-| Tide at 735×478, 15 fps | 1.3–1.4 ms per frame (2%) |
-| Lava Lamp at 1470×956, 24 fps | 0.9 ms per frame (2%) |
+| Live Sky at 1470×956 (half of 2940×1912), 20 fps | 1.6–4.8 ms GPU per frame (3–10% of the GPU's time) |
+| Aurora at 1470×956 and 30 fps, then at 1323×860 and 24 fps | 4.1 ms, then 11.6 ms per frame on a busier runner (12–28%); the costliest original |
+| Tide at 735×478, 15 fps | 1.3–1.8 ms per frame (2–3%) |
+| Lava Lamp at 1470×956, 24 fps | 0.9–1.3 ms per frame (2–3%) |
+
+With the default "rests while you work", originals draw only on the Lock Screen, for a few seconds after unlock and while the desktop is clear, so their cost while you work is zero. Aurora is the one to measure first on a real Mac; if it costs more than about 2% of the GPU, lower its resolution or simplify its curtains.
 
 ## Living Photos: video or real-time?
 

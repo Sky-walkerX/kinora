@@ -32,8 +32,8 @@ All on `claude/gifted-darwin-0w9cpx`, one commit per increment, each built and t
 
 - `./build.sh test`: all tests pass, 140+ across KinoraKit and KinoraMedia (the KinoraKit subset also passes on Linux with Swift 6.3.3).
 - `./build.sh` (universal release build and bundle assembly, ad hoc signed): succeeds.
-- Living Photo pipeline end to end: synthetic photo, Vision found and lifted the subject, 30-frame loop of exact duration and size, last frame leads back to the first, cancellation removes partial output, non-photos refused, original untouched. Full-size release benchmark: 17.8 s for a 12 s 2940×1912 loop, 10.6 MB, 469 MB peak memory.
-- All four shaders compile and draw non-flat, moving, deterministic images; Live Sky darkens at night. GPU per frame on the virtual GPU: 0.9–4.1 ms ([details](BENCHMARKS.md)).
+- Living Photo pipeline end to end: synthetic photo, Vision found and lifted the subject, 30-frame loop of exact duration and size, last frame leads back to the first, cancellation removes partial output, non-photos refused, original untouched. Full-size release benchmark: 17.8–25.8 s for a 12 s 2940×1912 loop, 10.6 MB, 469–598 MB peak memory.
+- All four shaders compile and draw non-flat, moving, deterministic images; Live Sky darkens at night. GPU per frame on the virtual GPU: 0.9–11.6 ms, noisy between runners, Aurora the costliest ([details](BENCHMARKS.md)).
 - GIF conversion keeps frame timing; still GIFs are recognised.
 
 **Not observed; assumptions until checked on a Mac:**
@@ -43,8 +43,9 @@ All on `claude/gifted-darwin-0w9cpx`, one commit per increment, each built and t
 - That the sandbox exceptions let the plug-in read the aerial folders and `/usr/share/zoneinfo`.
 - That System Settings accepts the second tile group.
 - Real-Mac CPU, GPU, energy and memory for any new path; Living Photo quality on real photos.
-- App Intents appearing in Shortcuts (depends on SwiftPM producing `Metadata.appintents`; CI now prints where it lands).
 - Login item, update check against a real release, uninstall leaving no System Settings section, quarantined-download install.
+
+**Observed limitation: Shortcuts actions.** The release build runs Apple's App Intents metadata extractor only for the library modules ("Extracted no relevant App Intents symbols") and produces no `Metadata.appintents` for the app, so the four actions in `Intents.swift` will not appear in Shortcuts yet. The `kinora://` links work without it (Shortcuts' "Open URLs"). Fixing it needs either an Xcode project for the app target or running `appintentsmetadataprocessor` by hand in `build.sh` with the compiler's const-values output.
 
 ## Owner checklists
 
@@ -80,7 +81,7 @@ Build: `./build.sh test && ./build.sh install`, open `~/Applications/Kinora.app`
 **App**
 - [ ] Onboarding on first launch (`defaults delete io.github.sky-walkerx.kinora onboarded` to see it again).
 - [ ] Menu bar: pause/resume, switch, playlist.
-- [ ] Shortcuts lists Kinora's actions (may not, see above); `open kinora://pause` and `open kinora://resume` work.
+- [ ] `open kinora://pause`, `open kinora://resume` and `open kinora://next` work. (Shortcuts actions won't show yet; see above.)
 - [ ] Open at login; Save Diagnostics produces a readable file with no names.
 - [ ] Remove Kinora (without deleting the library): original wallpaper back, no Kinora section in System Settings after relaunching it. Reinstall with `./build.sh install` afterwards.
 
@@ -102,6 +103,7 @@ Build: `./build.sh test && ./build.sh install`, open `~/Applications/Kinora.app`
 - Sparkle 2 updates need an EdDSA key; decide with the owner. Today's checker only links to releases.
 - Developer ID and notarization: decide with the owner ([options](INSTALL.md)); nothing bought, no signing material uploaded.
 - Publish a release and the Homebrew tap only when the owner says go.
+- Make the Shortcuts actions appear (App Intents metadata for the app target, see Validation).
 - Localisation (String Catalogs), Reduce Transparency audit, VoiceOver pass on the new views.
 
 ## Development and verification

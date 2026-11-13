@@ -38,8 +38,7 @@ jobs:
         run: |
           ./build.sh
           # Where the App Intents metadata for Shortcuts ended up, if anywhere.
-          find .build -name "*.appintents" -maxdepth 6 | head -5
-          ls build/Kinora.app/Contents/Resources
+          echo "App Intents metadata: $(find .build -name '*.appintents' -maxdepth 6 | head -3 | tr '\n' ' ')"
 
       # Generation cost on the CI runner, a virtual Mac. Not representative of a real Mac's
       # GPU or encoder; it shows the pipeline works at full size and roughly what it costs.
