@@ -5,61 +5,55 @@ import KinoraKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The sidebar's sections.
+enum SidebarItem: Hashable {
+    case library
+    case aerials
+    case playlist(UUID)
+}
+
 struct ContentView: View {
     @Environment(LibraryModel.self) private var library
     @Environment(WallpaperController.self) private var wallpaper
-    @State private var selection: LibraryItem.ID?
-    @State private var choosingFiles = false
+    @State private var section: SidebarItem? = .library
+    @State private var selection: UUID?
     @State private var showInspector = true
+    @State private var choosingFiles = false
     @State private var dropTargeted = false
 
-    private var selectedItem: LibraryItem? { library.items.first { $0.id == selection } }
-
     var body: some View {
-        Group {
-            if library.items.isEmpty {
-                emptyState
-            } else {
-                LibraryGrid(selection: $selection)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            if dropTargeted {
-                RoundedRectangle(cornerRadius: 14).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false)
-            }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            Task { await library.importVideos(urls) }
-            return !urls.isEmpty
-        } isTargeted: { dropTargeted = $0 }
-        .inspector(isPresented: $showInspector) {
-            Inspector(item: selectedItem)
-                .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Add Videos", systemImage: "plus") { choosingFiles = true }
-                    .help("Add videos to your library")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu("Rotate", systemImage: "arrow.trianglehead.2.clockwise.rotate.90") {
-                    Section("Rotate through all wallpapers") {
-                        ForEach(RotationChoice.allCases) { choice in
-                            Button(choice.title) { Task { await rotate(every: choice.interval) } }
-                        }
+        NavigationSplitView {
+            Sidebar(section: $section)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
+        } detail: {
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    if dropTargeted {
+                        RoundedRectangle(cornerRadius: 14).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false)
                     }
                 }
-                .disabled(library.items.count < 2 || wallpaper.working)
-                .help("Change wallpapers automatically")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button("Inspector", systemImage: "sidebar.right") { showInspector.toggle() }
-            }
+                .dropDestination(for: URL.self) { urls, _ in
+                    Task { await library.importVideos(urls) }
+                    return !urls.isEmpty
+                } isTargeted: { dropTargeted = $0 }
+                .inspector(isPresented: $showInspector) {
+                    Inspector(itemID: selection)
+                        .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Add Videos", systemImage: "plus") { choosingFiles = true }
+                            .help("Add videos or folders of videos to your library")
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Inspector", systemImage: "sidebar.right") { showInspector.toggle() }
+                    }
+                }
         }
         .navigationTitle("Kinora")
         .navigationSubtitle(subtitle)
-        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.movie], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.movie, .folder], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             Task {
                 let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
@@ -78,20 +72,22 @@ struct ContentView: View {
         .onAppear { selection = Self.preferred(current: wallpaper.currentItem, among: library.items.map(\.id)) }
     }
 
+    @ViewBuilder private var detail: some View {
+        switch section ?? .library {
+        case .library:
+            LibraryPage(selection: $selection, choosingFiles: $choosingFiles)
+        case .aerials:
+            AerialsPage(selection: $selection)
+        case .playlist(let id):
+            PlaylistPage(playlistID: id, selection: $selection, section: $section)
+        }
+    }
+
     /// The current wallpaper when it is in the library, else the first item. Kept as plain
     /// statements: Swift 6.3's type checker times out on the one-expression version.
     private static func preferred(current: UUID?, among ids: [UUID]) -> UUID? {
         if let current, ids.contains(current) { return current }
         return ids.first
-    }
-
-    private func rotate(every interval: TimeInterval) async {
-        let items = library.items.map(\.id)
-        guard let first = items.first else { return }
-        var rules = wallpaper.followsSelection ? (wallpaper.selection?.rules ?? WallpaperRules(wallpaper: first)) : WallpaperRules(wallpaper: first)
-        rules.schedule = nil
-        rules.rotation = WallpaperRules.Rotation(items: items, interval: interval, since: Date())
-        await wallpaper.apply(rules)
     }
 
     private var subtitle: String {
@@ -105,137 +101,69 @@ struct ContentView: View {
         Binding(get: { library.lastError != nil || wallpaper.lastError != nil },
                 set: { if !$0 { library.lastError = nil; wallpaper.lastError = nil } })
     }
-
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label("Drop a video here", systemImage: "play.rectangle.on.rectangle")
-        } description: {
-            Text("Kinora plays it on your desktop and Lock Screen, and pauses it when you can't see it.")
-        } actions: {
-            Button("Choose Videos…") { choosingFiles = true }
-        }
-    }
 }
 
-struct LibraryGrid: View {
+/// Library sections, playlists and the gallery.
+struct Sidebar: View {
     @Environment(LibraryModel.self) private var library
     @Environment(WallpaperController.self) private var wallpaper
-    @Binding var selection: LibraryItem.ID?
-    @State private var renaming: LibraryItem?
+    @Binding var section: SidebarItem?
+    @State private var renaming: Playlist?
     @State private var newName = ""
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 280), spacing: 18)], spacing: 22) {
-                ForEach(library.items) { item in
-                    LibraryTile(item: item, thumbnail: library.thumbnailURL(item), isSelected: selection == item.id,
-                                isCurrent: wallpaper.currentItem == item.id)
-                        .onTapGesture { selection = item.id }
-                        .simultaneousGesture(TapGesture(count: 2).onEnded { Task { await wallpaper.use(item) } })
+        List(selection: $section) {
+            Section("Library") {
+                Label("Your Wallpapers", systemImage: "photo.on.rectangle").tag(SidebarItem.library)
+                Label("Apple Aerials", systemImage: "airplane").tag(SidebarItem.aerials)
+            }
+            Section("Playlists") {
+                ForEach(library.playlists) { playlist in
+                    PlaylistRow(playlist: playlist, isPlaying: wallpaper.selection?.rules.rotation?.playlist == playlist.id)
+                        .tag(SidebarItem.playlist(playlist.id))
                         .contextMenu {
-                            Button("Use as Wallpaper") { Task { await wallpaper.use(item) } }
-                            Button("Rename…") { newName = item.name; renaming = item }
-                            Divider()
-                            Button("Remove from Library", role: .destructive) { library.remove(item) }
-                                .disabled(wallpaper.currentItem == item.id)
+                            Button("Rename…") { newName = playlist.name; renaming = playlist }
+                            Button("Delete Playlist", role: .destructive) { delete(playlist) }
                         }
                 }
+                Button {
+                    let playlist = library.createPlaylist(named: "New Playlist")
+                    section = .playlist(playlist.id)
+                } label: {
+                    Label("New Playlist", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
             }
-            .padding(22)
         }
-        .alert("Rename Wallpaper", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+        .listStyle(.sidebar)
+        .alert("Rename Playlist", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
-            Button("Rename") { if let renaming { library.rename(renaming, to: newName) } }
+            Button("Rename") { if let renaming { library.renamePlaylist(renaming.id, to: newName) } }
             Button("Cancel", role: .cancel) {}
         }
     }
+
+    private func delete(_ playlist: Playlist) {
+        if section == .playlist(playlist.id) { section = .library }
+        library.deletePlaylist(playlist.id)
+        var emptied = playlist
+        emptied.items = []
+        Task { await wallpaper.playlistChanged(emptied) }
+    }
 }
 
-struct LibraryTile: View {
-    let item: LibraryItem
-    let thumbnail: URL
-    let isSelected: Bool
-    let isCurrent: Bool
+private struct PlaylistRow: View {
+    let playlist: Playlist
+    let isPlaying: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Thumbnail(url: thumbnail)
-                .clipShape(.rect(cornerRadius: 10))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator), lineWidth: isSelected ? 3 : 0.5)
-                }
-                .overlay(alignment: .topTrailing) {
-                    if isCurrent {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title3)
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, .tint)
-                            .padding(7)
-                            .accessibilityLabel("Current wallpaper")
-                    }
-                }
-                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
-            Text(item.name)
-                .font(.callout)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(isSelected ? .primary : .secondary)
+        Label {
+            Text(playlist.name)
+        } icon: {
+            Image(systemName: isPlaying ? "play.circle.fill" : "music.note.list")
         }
-        .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-/// A wallpaper's still in a fixed 16:10 frame, filled and cropped, so every tile lines up
-/// whatever the video's shape.
-struct Thumbnail: View {
-    let url: URL
-
-    var body: some View {
-        Rectangle()
-            .fill(.quaternary)
-            .aspectRatio(16 / 10, contentMode: .fit)
-            .overlay {
-                if let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                } else {
-                    Image(systemName: "film").foregroundStyle(.secondary)
-                }
-            }
-            .clipped()
-    }
-}
-
-/// How often a rotation changes wallpaper.
-enum RotationChoice: CaseIterable, Identifiable {
-    case quarterHour, hour, fourHours, day, unlock
-
-    var id: Self { self }
-
-    var interval: TimeInterval {
-        switch self {
-        case .quarterHour: 15 * 60
-        case .hour: 3600
-        case .fourHours: 4 * 3600
-        case .day: 24 * 3600
-        case .unlock: 0
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .quarterHour: "Every 15 Minutes"
-        case .hour: "Every Hour"
-        case .fourHours: "Every 4 Hours"
-        case .day: "Every Day"
-        case .unlock: "Each Time You Unlock"
-        }
-    }
-
-    static func describe(_ interval: TimeInterval) -> String {
-        allCases.first { $0.interval == interval }.map { $0.title.lowercased() }
-            ?? Duration.seconds(interval).formatted(.units(allowed: [.hours, .minutes], width: .wide))
+        .badge(playlist.items.count)
+        .accessibilityValue(isPlaying ? "Playing" : "")
     }
 }

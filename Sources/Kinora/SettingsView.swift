@@ -59,6 +59,15 @@ struct SettingsView: View {
                 Toggle("Pause in Low Power Mode", isOn: $settings.playback.pauseInLowPowerMode)
                 Toggle("Pause when your Mac is hot", isOn: $settings.playback.pauseWhenHot)
             }
+
+            Section {
+                Toggle("Hold a still when Reduce Motion is on", isOn: $settings.playback.pauseWithReduceMotion)
+                Toggle("Pause all wallpapers", isOn: $settings.playback.paused)
+            } header: {
+                Text("Motion")
+            } footer: {
+                Text("Reduce Motion is in System Settings › Accessibility › Display. Paused wallpapers hold their current frame until you resume them.")
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)

@@ -61,6 +61,13 @@ struct KinoraApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandMenu("Wallpaper") {
+                Toggle("Pause Wallpapers", isOn: Binding(get: { settings.playback.paused }, set: { settings.playback.paused = $0 }))
+                    .keyboardShortcut("p", modifiers: [.command, .option])
+                Button("Next Wallpaper") { Task { await wallpaper.next() } }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                    .disabled(wallpaper.selection?.rules.rotation == nil)
+            }
         }
     }
 }

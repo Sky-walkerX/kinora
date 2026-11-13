@@ -87,12 +87,77 @@ import Observation
     }
 
     func use(_ item: LibraryItem) async {
+        await use(itemID: item.id)
+    }
+
+    func use(itemID: UUID) async {
         // A new wallpaper keeps the Lock Screen and dark variants but ends any rotation or schedule.
-        var rules = selection?.rules ?? WallpaperRules(wallpaper: item.id)
-        rules.wallpaper = item.id
+        var rules = selection?.rules ?? WallpaperRules(wallpaper: itemID)
+        rules.wallpaper = itemID
         rules.rotation = nil
         rules.schedule = nil
         await apply(rules)
+    }
+
+    /// The rules to edit: the live selection when there is one, else a fresh one around `fallback`.
+    func editableRules(fallback: UUID) -> WallpaperRules {
+        selection?.rules ?? WallpaperRules(wallpaper: fallback)
+    }
+
+    /// Plays a playlist on the desktop, changing every `interval` seconds (zero: on every unlock).
+    func play(_ playlist: Playlist, every interval: TimeInterval, shuffle: Bool) async {
+        guard let first = playlist.items.first else { return }
+        var rules = editableRules(fallback: first)
+        rules.schedule = nil
+        rules.wallpaper = first
+        rules.rotation = WallpaperRules.Rotation(items: playlist.items, interval: interval, since: Date(), playlist: playlist.id, shuffle: shuffle)
+        await apply(rules)
+    }
+
+    /// Keeps a playing rotation in step with its playlist after the playlist changed.
+    func playlistChanged(_ playlist: Playlist) async {
+        guard var rules = selection?.rules, var rotation = rules.rotation, rotation.playlist == playlist.id,
+              rotation.items != playlist.items else { return }
+        if playlist.items.isEmpty {
+            rules.rotation = nil
+        } else {
+            rotation.items = playlist.items
+            rules.rotation = rotation
+            if !playlist.items.contains(rules.wallpaper), let first = playlist.items.first { rules.wallpaper = first }
+        }
+        await apply(rules)
+    }
+
+    /// Moves a rotation on to its next wallpaper.
+    func next() async {
+        guard let rules = selection?.rules, rules.rotation != nil else { return }
+        await apply(rules.advanced())
+    }
+
+    /// Sets the time-of-day schedule; an empty list turns it off.
+    func setSchedule(_ entries: [WallpaperRules.ScheduleEntry], fallback: UUID) async {
+        await apply(editableRules(fallback: fallback).scheduled(entries))
+    }
+
+    /// Where Kinora's rules use an item.
+    func uses(of id: UUID) -> [RuleUse] {
+        selection?.rules.uses(of: id) ?? []
+    }
+
+    /// Takes an item out of the live selection before it leaves the library. Returns false when
+    /// it is the only thing Kinora shows, so removing it would leave the wallpaper empty.
+    func forget(_ id: UUID, replacement: UUID?) async -> Bool {
+        guard let rules = selection?.rules, !rules.uses(of: id).isEmpty else { return true }
+        guard let edited = rules.removing(id, replacement: replacement) else { return !followsSelection }
+        await apply(edited)
+        return true
+    }
+
+    /// The item on the desktop right now, after rotation, schedule and dark mode.
+    func shownItem(dark: Bool, at date: Date = Date()) -> UUID? {
+        guard let currentItem else { return nil }
+        guard followsSelection, let rules = selection?.rules else { return currentItem }
+        return rules.item(for: .default, appearance: dark ? .dark : .light, at: date)
     }
 
     /// Changes the live selection. When macOS's choice already follows Kinora, the plug-in picks

@@ -24,11 +24,53 @@ public struct WallpaperRules: Codable, Equatable, Sendable {
         public var interval: TimeInterval
         /// When the rotation started, so every surface and every restart agrees on the item.
         public var since: Date
+        /// The playlist the items came from, so the app can name it and keep it in step.
+        public var playlist: UUID?
+        /// Plays the items in a shuffled order, a new one on every pass.
+        public var shuffle: Bool?
+        /// Steps skipped with "Next".
+        public var offset: Int?
 
-        public init(items: [UUID], interval: TimeInterval, since: Date) {
+        public init(items: [UUID], interval: TimeInterval, since: Date, playlist: UUID? = nil, shuffle: Bool = false, offset: Int = 0) {
             self.items = items
             self.interval = interval
             self.since = since
+            self.playlist = playlist
+            self.shuffle = shuffle ? true : nil
+            self.offset = offset == 0 ? nil : offset
+        }
+
+        /// How many changes have happened by `date`, counting skips.
+        public func step(at date: Date, unlockCount: Int) -> Int {
+            let elapsed = interval > 0 ? Int(min(Double(Int.max / 2), max(0, date.timeIntervalSince(since)) / interval)) : max(0, unlockCount)
+            return max(0, elapsed + (offset ?? 0))
+        }
+
+        /// The item shown at a step.
+        public func item(atStep step: Int) -> UUID? {
+            guard !items.isEmpty else { return nil }
+            let count = items.count
+            guard shuffle == true, count > 1 else { return items[step % count] }
+            let pass = step / count
+            var order = Self.shuffled(items, pass: pass, seed: since)
+            // A new pass never starts with the item the previous pass ended on.
+            if pass > 0, order.first == Self.shuffled(items, pass: pass - 1, seed: since).last { order.swapAt(0, 1) }
+            return order[step % count]
+        }
+
+        /// A permutation every process computes the same way. Swift's own hashing is seeded per
+        /// process, so this uses FNV-1a over the identifier, the start time and the pass.
+        static func shuffled(_ items: [UUID], pass: Int, seed: Date) -> [UUID] {
+            let seedBits = UInt64(bitPattern: Int64((seed.timeIntervalSince1970 * 1000).rounded()))
+            func key(_ id: UUID) -> UInt64 {
+                var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+                func mix(_ byte: UInt8) { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3 }
+                withUnsafeBytes(of: id.uuid) { $0.forEach(mix) }
+                withUnsafeBytes(of: seedBits.littleEndian) { $0.forEach(mix) }
+                withUnsafeBytes(of: UInt64(truncatingIfNeeded: pass).littleEndian) { $0.forEach(mix) }
+                return hash
+            }
+            return items.map { ($0, key($0)) }.sorted { $0.1 != $1.1 ? $0.1 < $1.1 : $0.0.uuidString < $1.0.uuidString }.map(\.0)
         }
     }
 
@@ -66,9 +108,8 @@ public struct WallpaperRules: Codable, Equatable, Sendable {
                      calendar: Calendar = .current, unlockCount: Int = 0) -> UUID {
         if mode == .locked, let lockScreen { return lockScreen }
         if let entry = currentScheduleEntry(at: date, calendar: calendar) { return entry.item }
-        if let rotation, !rotation.items.isEmpty {
-            let step = rotation.interval > 0 ? Int(max(0, date.timeIntervalSince(rotation.since)) / rotation.interval) : unlockCount
-            return rotation.items[step % rotation.items.count]
+        if let rotation, let item = rotation.item(atStep: rotation.step(at: date, unlockCount: unlockCount)) {
+            return item
         }
         if appearance == .dark, let dark { return dark }
         return wallpaper

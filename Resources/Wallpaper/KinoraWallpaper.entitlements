@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- macOS requires wallpaper plug-ins to be sandboxed. The only extra right is reading Kinora's
-     library, which the app writes; Apple's own wallpaper plug-ins use the same kind of exception. -->
+<!-- macOS requires wallpaper plug-ins to be sandboxed. The only extra rights are reading Kinora's
+     library, which the app writes, and reading the aerials macOS has downloaded, which Kinora plays
+     in place; Apple's own wallpaper plug-ins use the same kind of exception. All are read-only. -->
 <plist version="1.0">
 <dict>
 	<key>com.apple.security.app-sandbox</key><true/>
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
 	<array>
 		<string>/Library/Application Support/Kinora/</string>
+		<string>/Library/Application Support/com.apple.wallpaper/aerials/</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/com.apple.idleassetsd/Customer/</string>
 	</array>
 </dict>
 </plist>

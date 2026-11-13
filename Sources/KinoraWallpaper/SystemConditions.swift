@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 The Kinora Contributors
 
+import AppKit
 import CoreGraphics
 import Foundation
 import IOKit.ps
@@ -13,6 +14,8 @@ import KinoraKit
     private(set) var onBattery = false
     private(set) var lowPowerMode = false
     private(set) var thermal: ThermalLevel = .nominal
+    /// Reduce Motion in Accessibility settings.
+    private(set) var reduceMotion = false
     private var coverage: [CGDirectDisplayID: Double] = [:]
     private var coverageTimer: Timer?
     private var observers: [NSObjectProtocol] = []
@@ -31,6 +34,11 @@ import KinoraKit
                 MainActor.assumeIsolated { self?.refreshPower() }
             })
         }
+        reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let workspace = NSWorkspace.shared.notificationCenter
+        observers.append(workspace.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshAccessibility() }
+        })
         let context = Unmanaged.passUnretained(self).toOpaque()
         if let source = IOPSNotificationCreateRunLoopSource({ context in
             guard let context else { return }
@@ -76,6 +84,13 @@ import KinoraKit
         }
         guard battery != onBattery || lowPower != lowPowerMode || level != thermal else { return }
         (onBattery, lowPowerMode, thermal) = (battery, lowPower, level)
+        onChange()
+    }
+
+    private func refreshAccessibility() {
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard reduce != reduceMotion else { return }
+        reduceMotion = reduce
         onChange()
     }
 

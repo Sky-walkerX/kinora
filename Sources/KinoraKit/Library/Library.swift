@@ -5,8 +5,26 @@ import Foundation
 
 /// One wallpaper in the user's library.
 public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
-    public enum Kind: String, Codable, Sendable {
-        case video
+    /// What the item is. Kinds this version does not know are kept as they are, so an older
+    /// Kinora that reads a newer library neither drops the item nor loses its kind on save.
+    public struct Kind: RawRepresentable, Codable, Hashable, Sendable {
+        public var rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
+
+        /// A video the user imported, kept in the library's media folder.
+        public static let video = Kind(rawValue: "video")
+        /// A still photo Kinora turned into a looping video. Plays like any video.
+        public static let livingPhoto = Kind(rawValue: "livingPhoto")
+        /// One of Apple's aerials that macOS already downloaded. Played where macOS keeps it,
+        /// never copied, and never deleted by Kinora.
+        public static let appleAerial = Kind(rawValue: "appleAerial")
+        /// A wallpaper installed from a Kinora wallpaper package or the gallery.
+        public static let package = Kind(rawValue: "package")
     }
 
     public var id: UUID
@@ -35,8 +53,39 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
 
     /// Disk space the optimization saved, when it saved any.
     public var savedBytes: Int64 {
-        guard let originalBytes, let storedBytes, originalBytes > storedBytes else { return 0 }
+        guard ownsMedia, let originalBytes, let storedBytes, originalBytes > storedBytes else { return 0 }
         return originalBytes - storedBytes
+    }
+
+    /// False for media Kinora only points at, such as Apple's aerials. Kinora never deletes those.
+    public var ownsMedia: Bool { kind != .appleAerial }
+
+    /// Credit for content made by someone else, shown wherever the item is.
+    public var attribution: Attribution?
+
+    public struct Attribution: Codable, Equatable, Sendable {
+        public var author: String?
+        /// An SPDX identifier or a short license name, such as "CC-BY-4.0".
+        public var license: String?
+        public var source: URL?
+        public init(author: String? = nil, license: String? = nil, source: URL? = nil) {
+            self.author = author
+            self.license = license
+            self.source = source
+        }
+    }
+}
+
+/// A named, ordered set of library items to rotate through.
+public struct Playlist: Codable, Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var items: [UUID]
+
+    public init(id: UUID = UUID(), name: String, items: [UUID] = []) {
+        self.id = id
+        self.name = name
+        self.items = items
     }
 }
 
@@ -46,13 +95,28 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
 
     public var version: Int
     public var items: [LibraryItem]
+    /// Absent in libraries written before playlists existed.
+    public var playlists: [Playlist]?
 
-    public init(items: [LibraryItem] = []) {
+    public init(items: [LibraryItem] = [], playlists: [Playlist]? = nil) {
         self.version = Self.currentVersion
         self.items = items
+        self.playlists = playlists
     }
 
     public func item(_ id: UUID) -> LibraryItem? { items.first { $0.id == id } }
+
+    /// The library without `id`, and without it in any playlist.
+    public func removing(_ id: UUID) -> LibraryIndex {
+        var index = self
+        index.items.removeAll { $0.id == id }
+        index.playlists = playlists?.map { playlist in
+            var playlist = playlist
+            playlist.items.removeAll { $0 == id }
+            return playlist
+        }
+        return index
+    }
 
     public func encoded() throws -> Data {
         let encoder = JSONEncoder()
@@ -69,7 +133,15 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
         // An item naming a path instead of a file in the library folder is dropped, so a damaged
         // or tampered index cannot point Kinora at files outside the library.
         let items = raw.items.compactMap(\.value).filter { isPlainFileName($0.media) && isPlainFileName($0.thumbnail) }
-        var index = LibraryIndex(items: items)
+        let known = Set(items.map(\.id))
+        // Playlists keep only items that still exist, in their order, once each.
+        let playlists = raw.playlists?.compactMap(\.value).map { playlist -> Playlist in
+            var seen: Set<UUID> = []
+            var playlist = playlist
+            playlist.items = playlist.items.filter { known.contains($0) && seen.insert($0).inserted }
+            return playlist
+        }
+        var index = LibraryIndex(items: items, playlists: playlists)
         index.version = raw.version
         return index
     }
@@ -77,6 +149,7 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
     private struct LossyIndex: Decodable {
         var version: Int
         var items: [Lossy<LibraryItem>]
+        var playlists: [Lossy<Playlist>]?
     }
 
     private struct Lossy<T: Decodable>: Decodable {
@@ -112,7 +185,22 @@ public struct LibraryLocation: Equatable, Sendable {
     public var thumbnailFolder: URL { root.appendingPathComponent("Thumbnails", isDirectory: true) }
     public var backupFolder: URL { root.appendingPathComponent("Backups", isDirectory: true) }
 
-    public func mediaURL(for item: LibraryItem) -> URL { mediaFolder.appendingPathComponent(item.media) }
+    /// Packages installed from files or the gallery, one folder each.
+    public var packagesFolder: URL { root.appendingPathComponent("Packages", isDirectory: true) }
+    /// Work in progress, such as a Living Photo being rendered or a download. Cleared at launch.
+    public var workFolder: URL { root.appendingPathComponent("Work", isDirectory: true) }
+
+    /// Where an item's video is. Apple's aerials stay where macOS keeps them.
+    public func mediaURL(for item: LibraryItem, home: URL = realHomeDirectory()) -> URL {
+        if item.kind == .appleAerial { return AppleAerials.videoURL(fileName: item.media, home: home) }
+        return mediaFolder.appendingPathComponent(item.media)
+    }
+
+    /// The item's media when Kinora owns it and may delete it; nil for media it only points at.
+    public func ownedMediaURL(for item: LibraryItem) -> URL? {
+        item.ownsMedia ? mediaFolder.appendingPathComponent(item.media) : nil
+    }
+
     public func thumbnailURL(for item: LibraryItem) -> URL { thumbnailFolder.appendingPathComponent(item.thumbnail) }
 }
 

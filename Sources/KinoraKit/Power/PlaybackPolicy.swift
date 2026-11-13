@@ -21,6 +21,12 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     public var settleDelay: TimeInterval = 5
     /// At or below this coverage the desktop counts as clear, and a resting wallpaper moves.
     public var clearDesktopThreshold = 0.05
+    /// Paused by the user, from the menu bar or a shortcut, until they resume.
+    public var paused = false
+    /// Hold a still while Reduce Motion is on in Accessibility settings.
+    public var pauseWithReduceMotion = true
+    /// The highest frame rate Kinora's own generative wallpapers draw at.
+    public var generativeFrameRate = 30
 
     public init() {}
 
@@ -35,6 +41,9 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         settleAfterUnlock = try c.decodeIfPresent(Bool.self, forKey: .settleAfterUnlock) ?? d.settleAfterUnlock
         settleDelay = max(0, try c.decodeIfPresent(Double.self, forKey: .settleDelay) ?? d.settleDelay)
         clearDesktopThreshold = min(0.5, max(0, try c.decodeIfPresent(Double.self, forKey: .clearDesktopThreshold) ?? d.clearDesktopThreshold))
+        paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? d.paused
+        pauseWithReduceMotion = try c.decodeIfPresent(Bool.self, forKey: .pauseWithReduceMotion) ?? d.pauseWithReduceMotion
+        generativeFrameRate = min(60, max(5, try c.decodeIfPresent(Int.self, forKey: .generativeFrameRate) ?? d.generativeFrameRate))
     }
 }
 
@@ -55,12 +64,14 @@ public struct PlaybackConditions: Equatable, Sendable {
     public var thermal: ThermalLevel = .nominal
     /// Seconds since the Mac last unlocked; nil when it has not been locked since the surface started.
     public var secondsSinceUnlock: TimeInterval?
+    /// Reduce Motion is on in Accessibility settings.
+    public var reduceMotion = false
 
     public init() {}
 }
 
 public enum PauseReason: String, Equatable, Sendable {
-    case suspendedBySystem, lowPowerMode, hot, covered, settled
+    case suspendedBySystem, lowPowerMode, hot, covered, settled, paused, reduceMotion
 }
 
 public enum PlaybackDecision: Equatable, Sendable {
@@ -74,6 +85,8 @@ public enum PlaybackPolicy {
         if c.activity == .suspended { return .pause(.suspendedBySystem) }
         // System Settings' preview always animates: it is small and the user is looking at it.
         if c.isPreview { return .play(maxFramesPerSecond: nil) }
+        if settings.paused { return .pause(.paused) }
+        if settings.pauseWithReduceMotion, c.reduceMotion { return .pause(.reduceMotion) }
         if settings.pauseInLowPowerMode, c.lowPowerMode { return .pause(.lowPowerMode) }
         if settings.pauseWhenHot, c.thermal >= .serious { return .pause(.hot) }
         let cap = c.onBattery ? settings.batteryFrameCap : nil

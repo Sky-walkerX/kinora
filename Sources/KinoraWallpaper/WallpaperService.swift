@@ -141,11 +141,19 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
         guard let record = records[id] else { return }
         let rules = record.configuration?.rules(selection: selection) ?? selection?.rules
         let wanted = rules?.item(for: record.presentation, appearance: record.appearance, at: Date(), unlockCount: unlockCount)
-        // An item deleted from the library falls back to the rules' main wallpaper, then any item.
-        guard let item = wanted.flatMap(library.item) ?? rules.flatMap({ library.item($0.wallpaper) })
-            ?? (record.isPreview ? library.items.first : nil) else {
-            log.error("surface \(id, privacy: .public) names no item that is in the library")
+        // An item deleted from the library falls back to another one the rules name, then
+        // Kinora's own selection, then any item, so the surface never goes blank.
+        var fallbacks: [UUID] = []
+        if let main = selection?.rules.wallpaper { fallbacks.append(main) }
+        fallbacks.append(contentsOf: library.items.map(\.id))
+        let available = Set(library.items.map(\.id))
+        guard let resolved = ContentResolution.item(wanted: wanted, rules: rules, fallbacks: fallbacks, exists: { available.contains($0) }),
+              let item = library.item(resolved) else {
+            log.error("surface \(id, privacy: .public) has nothing in the library to show")
             return
+        }
+        if let wanted, wanted != item.id {
+            log.notice("surface \(id, privacy: .public) wanted \(wanted.uuidString, privacy: .public), which is gone; showing \(item.id.uuidString, privacy: .public)")
         }
         // A newly shown wallpaper plays for a moment before resting, as after an unlock.
         if record.surface.itemID != item.id, !record.isPreview {
@@ -169,6 +177,7 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
             c.lowPowerMode = conditions.lowPowerMode
             c.thermal = conditions.thermal
             c.secondsSinceUnlock = record.unlockedAt.map { Date().timeIntervalSince($0) }
+            c.reduceMotion = conditions.reduceMotion
             record.surface.apply(PlaybackPolicy.decide(c, settings: settings))
             if record.presentation == .default, !record.isPreview { anyDesktop = true }
             if settings.settleAfterUnlock, let unlocked = record.unlockedAt {
