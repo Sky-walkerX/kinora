@@ -25,6 +25,8 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
         public static let appleAerial = Kind(rawValue: "appleAerial")
         /// A wallpaper installed from a Kinora wallpaper package or the gallery.
         public static let package = Kind(rawValue: "package")
+        /// One of Kinora's built-in generative wallpapers. Never stored in the index.
+        public static let original = Kind(rawValue: "original")
     }
 
     public var id: UUID
@@ -58,7 +60,10 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// False for media Kinora only points at, such as Apple's aerials. Kinora never deletes those.
-    public var ownsMedia: Bool { kind != .appleAerial }
+    public var ownsMedia: Bool { kind != .appleAerial && kind != .original }
+
+    /// True for items the user may rename and remove.
+    public var isEditable: Bool { kind != .original }
 
     /// Credit for content made by someone else, shown wherever the item is.
     public var attribution: Attribution?
@@ -133,7 +138,7 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
         // An item naming a path instead of a file in the library folder is dropped, so a damaged
         // or tampered index cannot point Kinora at files outside the library.
         let items = raw.items.compactMap(\.value).filter { isPlainFileName($0.media) && isPlainFileName($0.thumbnail) }
-        let known = Set(items.map(\.id))
+        let known = Set(items.map(\.id)).union(KinoraOriginals.all.map(\.id))
         // Playlists keep only items that still exist, in their order, once each.
         let playlists = raw.playlists?.compactMap(\.value).map { playlist -> Playlist in
             var seen: Set<UUID> = []

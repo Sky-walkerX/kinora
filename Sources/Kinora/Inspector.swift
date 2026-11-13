@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Kinora Contributors
 
 import KinoraKit
+import KinoraRender
 import SwiftUI
 
 /// The selected wallpaper, what Kinora is doing, and what it costs.
@@ -17,7 +18,9 @@ struct Inspector: View {
 
     var body: some View {
         Form {
-            if let item {
+            if let item, item.kind == .original, let original = KinoraOriginals.original(item.id) {
+                OriginalInspectorSection(original: original)
+            } else if let item {
                 Section {
                     Thumbnail(url: library.thumbnailURL(item))
                         .clipShape(.rect(cornerRadius: 10))
@@ -87,15 +90,13 @@ struct Inspector: View {
                 Task { await wallpaper.change { $0.lockScreen = id } }
             })) {
                 Text("Same as Desktop").tag(UUID?.none)
-                Divider()
-                ForEach(library.items) { Text($0.name).tag(UUID?.some($0.id)) }
+                WallpaperChoices()
             }
             Picker("Dark Mode", selection: Binding(get: { rules.dark }, set: { id in
                 Task { await wallpaper.change { $0.dark = id } }
             })) {
                 Text("Same as Light").tag(UUID?.none)
-                Divider()
-                ForEach(library.items) { Text($0.name).tag(UUID?.some($0.id)) }
+                WallpaperChoices()
             }
             LabeledContent("Time of Day") {
                 HStack {
@@ -190,6 +191,25 @@ struct Inspector: View {
         } label: {
             Text("Energy")
             Text("What the plug-in that draws your wallpaper uses right now. Video decoding in the graphics hardware isn't included.")
+        }
+    }
+}
+
+/// Every wallpaper as picker rows tagged with an optional identifier: the library, then the originals.
+struct WallpaperChoices: View {
+    @Environment(LibraryModel.self) private var library
+    var optional = true
+
+    var body: some View {
+        Divider()
+        ForEach(library.items) { item in
+            if optional { Text(item.name).tag(UUID?.some(item.id)) } else { Text(item.name).tag(item.id) }
+        }
+        if OriginalRenderer.shared != nil {
+            Divider()
+            ForEach(KinoraOriginals.all) { original in
+                if optional { Text(original.name).tag(UUID?.some(original.id)) } else { Text(original.name).tag(original.id) }
+            }
         }
     }
 }

@@ -4,6 +4,7 @@
 import Foundation
 import IOSurface
 import KinoraKit
+import KinoraRender
 import notify
 import os
 
@@ -14,7 +15,7 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
 /// endpoint hops here for every call.
 @MainActor final class WallpaperService {
     private struct Record {
-        let surface: VideoSurface
+        let surface: WallpaperSurface
         let configuration: ChoiceConfiguration?
         var presentation: PresentationMode
         var activity: ActivityState
@@ -33,6 +34,8 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
     private var unlockCount = 0
     private var changeTimer: Timer?
     private let conditions = SystemConditions()
+    /// Roughly where the Mac is, from its time zone, for the live sky. Never asks for location.
+    private let skyLocation = ApproximateLocation.current()
     private var settleTimer: Timer?
     private var notifyToken: Int32 = NOTIFY_TOKEN_INVALID
     /// Called with fresh System Settings tiles when the library changes.
@@ -55,7 +58,7 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
 
     func acquire(id: String, request: WallpaperCreationRequest) -> UInt32? {
         records[id]?.surface.tearDown()
-        guard let surface = VideoSurface(destination: request.destination) else {
+        guard let surface = WallpaperSurface(destination: request.destination) else {
             log.error("acquire \(id, privacy: .public): no remote context on this macOS")
             return nil
         }
@@ -106,7 +109,18 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
             SettingsTile(id: item.id.uuidString, name: item.name, thumbnail: location.thumbnailURL(for: item),
                          configuration: ChoiceConfiguration(wallpaper: item.id))
         }
-        return SettingsViewModels.json(groupName: "Kinora", tiles: tiles)
+        // Originals appear once the app has drawn their thumbnails, and only where Metal works.
+        let originals = OriginalRenderer.shared == nil ? [] : KinoraOriginals.all.compactMap { original -> SettingsTile? in
+            let thumbnail = location.thumbnailFolder.appendingPathComponent(original.thumbnailName)
+            guard FileManager.default.fileExists(atPath: thumbnail.path) else { return nil }
+            // Badged as video: it moves, and "video" is the one badge case seen to decode.
+            return SettingsTile(id: original.id.uuidString, name: original.name, thumbnail: thumbnail,
+                                configuration: ChoiceConfiguration(wallpaper: original.id))
+        }
+        return SettingsViewModels.json(groups: [
+            SettingsGroup(id: SettingsViewModels.groupID, name: "Kinora", tiles: tiles),
+            SettingsGroup(id: SettingsViewModels.originalsGroupID, name: "Kinora Originals", tiles: originals),
+        ])
     }
 
     // MARK: - Content and playback
@@ -146,22 +160,30 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
         var fallbacks: [UUID] = []
         if let main = selection?.rules.wallpaper { fallbacks.append(main) }
         fallbacks.append(contentsOf: library.items.map(\.id))
+        let metal = OriginalRenderer.shared != nil
+        if metal { fallbacks.append(contentsOf: KinoraOriginals.all.map(\.id)) }
         let available = Set(library.items.map(\.id))
-        guard let resolved = ContentResolution.item(wanted: wanted, rules: rules, fallbacks: fallbacks, exists: { available.contains($0) }),
-              let item = library.item(resolved) else {
-            log.error("surface \(id, privacy: .public) has nothing in the library to show")
+        let exists: (UUID) -> Bool = { available.contains($0) || (metal && KinoraOriginals.isOriginal($0)) }
+        guard let resolved = ContentResolution.item(wanted: wanted, rules: rules, fallbacks: fallbacks, exists: exists) else {
+            log.error("surface \(id, privacy: .public) has nothing to show")
             return
         }
-        if let wanted, wanted != item.id {
-            log.notice("surface \(id, privacy: .public) wanted \(wanted.uuidString, privacy: .public), which is gone; showing \(item.id.uuidString, privacy: .public)")
+        if let wanted, wanted != resolved {
+            log.notice("surface \(id, privacy: .public) wanted \(wanted.uuidString, privacy: .public), which is gone; showing \(resolved.uuidString, privacy: .public)")
         }
         // A newly shown wallpaper plays for a moment before resting, as after an unlock.
-        if record.surface.itemID != item.id, !record.isPreview {
+        if record.surface.itemID != resolved, !record.isPreview {
             records[id]?.unlockedAt = Date()
-            log.notice("surface \(id, privacy: .public) shows \(item.id.uuidString, privacy: .public) (\(String(describing: record.presentation), privacy: .public))")
+            log.notice("surface \(id, privacy: .public) shows \(resolved.uuidString, privacy: .public) (\(String(describing: record.presentation), privacy: .public))")
         }
-        record.surface.show(itemID: item.id, media: location.mediaURL(for: item), thumbnail: location.thumbnailURL(for: item),
-                            frameCap: conditions.onBattery ? settings.batteryFrameCap : nil)
+        if let original = KinoraOriginals.original(resolved) {
+            if !record.surface.showOriginal(original, settings: settings, location: skyLocation) {
+                log.error("surface \(id, privacy: .public) cannot draw \(original.slug, privacy: .public) without Metal")
+            }
+        } else if let item = library.item(resolved) {
+            record.surface.showVideo(itemID: item.id, media: location.mediaURL(for: item), thumbnail: location.thumbnailURL(for: item),
+                                     frameCap: conditions.onBattery ? settings.batteryFrameCap : nil)
+        }
     }
 
     private func reevaluate() {

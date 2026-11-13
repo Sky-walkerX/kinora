@@ -23,27 +23,52 @@ public struct SettingsTile: Equatable, Sendable {
 /// Builds the JSON System Settings reads to list a plug-in's wallpapers. The shape mirrors
 /// WallpaperTypes' `WallpaperSettingsViewModels` on macOS 27 (see docs/spikes); enum cases
 /// without payload are written the way Swift's synthesized Codable writes them, `{"name": {}}`.
+/// A section of tiles in System Settings.
+public struct SettingsGroup: Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var tiles: [SettingsTile]
+
+    public init(id: String, name: String, tiles: [SettingsTile]) {
+        self.id = id
+        self.name = name
+        self.tiles = tiles
+    }
+}
+
 public enum SettingsViewModels {
     public static let groupID = "io.github.sky-walkerx.kinora.library"
+    public static let originalsGroupID = "io.github.sky-walkerx.kinora.originals"
 
     public static func json(groupName: String, tiles: [SettingsTile]) -> Data {
-        let model = viewModel(groupName: groupName, tiles: tiles)
+        json(groups: [SettingsGroup(id: groupID, name: groupName, tiles: tiles)])
+    }
+
+    /// Groups without tiles are left out.
+    public static func json(groups: [SettingsGroup]) -> Data {
+        let model = viewModel(groups: groups)
         let root: [String: Any] = ["desktop": model, "screenSaver": model]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 
     static func viewModel(groupName: String, tiles: [SettingsTile]) -> [String: Any] {
-        let items = tiles.enumerated().map { index, tile in item(tile, sortOrder: index) }
-        let group: [String: Any] = [
-            "id": ["id": groupID],
-            "localizedName": groupName,
-            "disposability": unit("none"),
-            "sortID": ["id": "kinora"],
-            "shouldHideItemLabels": false,
-            "sortOrder": 0,
-            "items": items,
-        ]
-        return ["groups": tiles.isEmpty ? [] : [group], "refreshPolicy": unit("default"), "isModificationDisabled": false]
+        viewModel(groups: [SettingsGroup(id: groupID, name: groupName, tiles: tiles)])
+    }
+
+    static func viewModel(groups: [SettingsGroup]) -> [String: Any] {
+        let built = groups.filter { !$0.tiles.isEmpty }.enumerated().map { order, group -> [String: Any] in
+            let items = group.tiles.enumerated().map { index, tile in item(tile, sortOrder: index) }
+            return [
+                "id": ["id": group.id],
+                "localizedName": group.name,
+                "disposability": unit("none"),
+                "sortID": ["id": order == 0 ? "kinora" : "kinora.\(order)"],
+                "shouldHideItemLabels": false,
+                "sortOrder": order,
+                "items": items,
+            ]
+        }
+        return ["groups": built, "refreshPolicy": unit("default"), "isModificationDisabled": false]
     }
 
     static func item(_ tile: SettingsTile, sortOrder: Int) -> [String: Any] {

@@ -48,6 +48,8 @@ struct KinoraApp: App {
                     wallpaper.watchStore()
                     await wallpaper.repairPlugIn()
                     energy.start()
+                    // System Settings lists originals once their thumbnails exist.
+                    if await OriginalThumbnails.ensure(in: library.location.thumbnailFolder) { LibraryModel.postLibraryChanged() }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     // System Settings or another app may have changed the wallpaper meanwhile.

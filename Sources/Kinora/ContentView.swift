@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 enum SidebarItem: Hashable {
     case library
     case livingPhotos
+    case originals
     case aerials
     case playlist(UUID)
 }
@@ -67,7 +68,7 @@ struct ContentView: View {
         } message: { Text($0) }
         .onChange(of: library.items) { _, items in
             let ids: [UUID] = items.map(\.id)
-            if let selection, ids.contains(selection) { return }
+            if let selection, ids.contains(selection) || KinoraOriginals.isOriginal(selection) { return }
             selection = Self.preferred(current: wallpaper.currentItem, among: ids)
         }
         .onAppear { selection = Self.preferred(current: wallpaper.currentItem, among: library.items.map(\.id)) }
@@ -79,6 +80,8 @@ struct ContentView: View {
             LibraryPage(selection: $selection, choosingFiles: $choosingFiles)
         case .livingPhotos:
             LivingPhotosPage(selection: $selection)
+        case .originals:
+            OriginalsPage(selection: $selection)
         case .aerials:
             AerialsPage(selection: $selection)
         case .playlist(let id):
@@ -119,6 +122,7 @@ struct Sidebar: View {
             Section("Library") {
                 Label("Your Wallpapers", systemImage: "photo.on.rectangle").tag(SidebarItem.library)
                 Label("Living Photos", systemImage: "person.and.background.dotted").tag(SidebarItem.livingPhotos)
+                Label("Kinora Originals", systemImage: "sparkles").tag(SidebarItem.originals)
                 Label("Apple Aerials", systemImage: "airplane").tag(SidebarItem.aerials)
             }
             Section("Playlists") {

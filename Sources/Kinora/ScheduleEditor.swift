@@ -33,9 +33,7 @@ struct ScheduleEditor: View {
                             DatePicker("From", selection: time(for: $row), displayedComponents: .hourAndMinute)
                                 .labelsHidden()
                             Picker("Wallpaper", selection: $row.item) {
-                                ForEach(library.items) { item in
-                                    Text(item.name).tag(item.id)
-                                }
+                                WallpaperChoices(optional: false)
                             }
                             .labelsHidden()
                             Button("Remove", systemImage: "minus.circle") { rows.removeAll { $0.id == row.id } }

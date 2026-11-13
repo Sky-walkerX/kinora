@@ -25,7 +25,8 @@ import UniformTypeIdentifiers
     }
 
     func thumbnailURL(_ item: LibraryItem) -> URL { location.thumbnailURL(for: item) }
-    func item(_ id: UUID) -> LibraryItem? { items.first { $0.id == id } }
+    /// A library item, or one of Kinora's originals as an item.
+    func item(_ id: UUID) -> LibraryItem? { items.first { $0.id == id } ?? KinoraOriginals.original(id)?.libraryItem }
     func playlist(_ id: UUID) -> Playlist? { playlists.first { $0.id == id } }
 
     /// Copies playable videos into the library; folders are searched for videos. Files that are

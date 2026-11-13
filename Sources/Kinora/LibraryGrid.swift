@@ -94,12 +94,16 @@ struct LibraryGrid: View {
                     if !library.playlists.isEmpty { Divider() }
                     Button("New Playlist") { library.createPlaylist(named: "New Playlist", items: [item.id]) }
                 }
-                Button("Rename…") { newName = item.name; renaming = item }
+                if item.isEditable {
+                    Button("Rename…") { newName = item.name; renaming = item }
+                }
                 Divider()
                 if let playlistID {
                     Button("Remove from Playlist") { removeFromPlaylist(item.id, playlistID) }
                 }
-                Button("Remove from Library…", role: .destructive) { removing = item }
+                if item.isEditable {
+                    Button("Remove from Library…", role: .destructive) { removing = item }
+                }
             }
     }
 
@@ -225,6 +229,7 @@ struct KindBadge: View {
         if kind == .livingPhoto { return ("person.and.background.dotted", "Living Photo") }
         if kind == .appleAerial { return ("airplane", "Apple Aerial") }
         if kind == .package { return ("shippingbox", "Installed package") }
+        if kind == .original { return ("sparkles", "Kinora Original") }
         return nil
     }
 
