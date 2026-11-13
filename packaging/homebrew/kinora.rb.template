@@ -1,0 +1,30 @@
+# Cask for a personal tap, Sky-walkerX/homebrew-tap. Not published; Tools/package-release.sh
+# fills in the version and checksum. Kinora is not notarized, so this cannot go in homebrew/cask.
+cask "kinora" do
+  version "__VERSION__"
+  sha256 "__SHA256__"
+
+  url "https://github.com/Sky-walkerX/kinora/releases/download/v#{version}/Kinora-#{version}.zip"
+  name "Kinora"
+  desc "Live wallpapers for the desktop and Lock Screen"
+  homepage "https://github.com/Sky-walkerX/kinora"
+
+  depends_on macos: ">= :tahoe"
+
+  app "Kinora.app"
+
+  uninstall quit: "io.github.sky-walkerx.kinora"
+
+  zap trash: [
+    "~/Library/Application Support/Kinora",
+    "~/Library/Preferences/io.github.sky-walkerx.kinora.plist",
+  ]
+
+  caveats <<~EOS
+    Kinora is free software that is not notarized by Apple. The first time you open it,
+    macOS will refuse; open System Settings › Privacy & Security and choose Open Anyway.
+
+    Before uninstalling, use Kinora › Settings › Advanced › Remove Kinora to put back your
+    original wallpaper and remove its section from System Settings.
+  EOS
+end

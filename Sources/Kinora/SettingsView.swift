@@ -64,7 +64,7 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Open Kinora at login", isOn: Binding(get: { launchAtLogin }, set: setLaunchAtLogin))
+                Toggle("Open Kinora at login", isOn: Binding(get: { launchAtLogin }, set: { on in setLaunchAtLogin(on) }))
                 Toggle("Show Kinora in the menu bar", isOn: $showMenuBarExtra)
             } footer: {
                 Text(loginError ?? "Your wallpaper keeps playing without Kinora open. Open it at login for the menu bar controls.")

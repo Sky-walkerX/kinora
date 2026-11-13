@@ -47,6 +47,10 @@ assemble() { # directory holding the Kinora and KinoraWallpaper executables
     cp "$bin/Kinora" "$APP/Contents/MacOS/Kinora"
     cp "$bin/KinoraWallpaper" "$APPEX/Contents/MacOS/KinoraWallpaper"
     fill_plist Resources/App/Info.plist "$APP/Contents/Info.plist"
+    # Shortcuts reads an app's actions from Metadata.appintents, which Xcode's build system
+    # extracts during release builds. Copy it in when the build produced one.
+    local intents; intents=$(find "$bin/.." -maxdepth 4 -name "Metadata.appintents" -print -quit 2>/dev/null || true)
+    if [[ -n $intents ]]; then cp -R "$intents" "$APP/Contents/Resources/"; echo "included $intents"; fi
     fill_plist Resources/Wallpaper/Info.plist "$APPEX/Contents/Info.plist"
     printf 'APPL????' > "$APP/Contents/PkgInfo"
 

@@ -10,3 +10,7 @@ DerivedData/
 # Local signing material never belongs in git
 *.p12
 *.keychain-db
+
+# Release candidates and local measurements
+dist/
+measurements/

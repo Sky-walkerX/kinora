@@ -38,7 +38,7 @@ struct MenuBarView: View {
                 }
             }
         }
-        Picker("Desktop", selection: Binding(get: { settings.playback.settleAfterUnlock }, set: { KinoraCommands.setResting($0) })) {
+        Picker("Desktop", selection: Binding(get: { settings.playback.settleAfterUnlock }, set: { resting in KinoraCommands.setResting(resting) })) {
             Text("Rests While You Work").tag(true)
             Text("Always Moving").tag(false)
         }
