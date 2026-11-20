@@ -13,8 +13,10 @@ import Testing
         // Two displays lock, then both unlock a few milliseconds apart.
         counter.surface(from: .default, to: .locked)
         counter.surface(from: .default, to: .locked)
-        #expect(counter.surface(from: .locked, to: .default))
-        #expect(!counter.surface(from: .locked, to: .default))
+        let changed1 = counter.surface(from: .locked, to: .default)
+        #expect(changed1)
+        let changed2 = counter.surface(from: .locked, to: .default)
+        #expect(!changed2)
         #expect(counter.count == 1)
         // The next lock counts again.
         counter.surface(from: .default, to: .locked)
@@ -24,17 +26,22 @@ import Testing
 
     @Test func ignoresChangesThatAreNotAnUnlock() {
         var counter = UnlockCounter()
-        #expect(!counter.surface(from: .default, to: .idle))
-        #expect(!counter.surface(from: .idle, to: .default))
-        #expect(!counter.surface(from: .locked, to: .default))
-        #expect(!counter.surface(from: nil, to: .default))
+        let changed3 = counter.surface(from: .default, to: .idle)
+        #expect(!changed3)
+        let changed4 = counter.surface(from: .idle, to: .default)
+        #expect(!changed4)
+        let changed5 = counter.surface(from: .locked, to: .default)
+        #expect(!changed5)
+        let changed6 = counter.surface(from: nil, to: .default)
+        #expect(!changed6)
         #expect(counter.count == 0)
     }
 
     @Test func aSurfaceAcquiredWhileLockedCountsTheNextUnlock() {
         var counter = UnlockCounter()
         counter.surface(from: nil, to: .locked)
-        #expect(counter.surface(from: .locked, to: .default))
+        let changed7 = counter.surface(from: .locked, to: .default)
+        #expect(changed7)
     }
 
     @Test func belongsToOneRotation() {
@@ -46,10 +53,12 @@ import Testing
         // The same rotation, skipped ahead with Next, keeps its count.
         var skipped = rotation
         skipped.offset = 1
-        #expect(!counter.follow(skipped))
+        let changed8 = counter.follow(skipped)
+        #expect(!changed8)
         #expect(counter.count == 1)
         // A new rotation starts from its first item.
-        #expect(counter.follow(.init(items: rotation.items, interval: 0, since: since.addingTimeInterval(60))))
+        let changed9 = counter.follow(.init(items: rotation.items, interval: 0, since: since.addingTimeInterval(60)))
+        #expect(changed9)
         #expect(counter.count == 0)
         // Timed rotations and no rotation don't count unlocks.
         counter.surface(from: .default, to: .locked)
