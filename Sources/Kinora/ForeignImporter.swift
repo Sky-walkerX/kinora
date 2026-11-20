@@ -23,8 +23,8 @@ enum ForeignImporter {
         }
     }
 
-    /// The kind of manifest at `url`, a folder or a zip, if any. Zips are recognised by name only
-    /// here; they are measured and checked when imported.
+    /// The kind of manifest at `url`, a folder or a zip, if any. A zip's directory is read
+    /// without extracting anything; it is checked properly when imported.
     static func manifest(at url: URL) -> ForeignWallpaper.Source? {
         var isFolder: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { return nil }
@@ -32,22 +32,26 @@ enum ForeignImporter {
             let names = Set((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? [])
             return ForeignWallpaper.manifest(in: names)?.source
         }
-        guard url.pathExtension.lowercased() == "zip" else { return nil }
-        // A zip holding a Lively manifest, by its listing, without extracting anything.
-        let listing = Shell.run("/usr/bin/zipinfo", ["-1", url.path])
-        guard listing.status == 0 else { return nil }
-        let names = Set(listing.output.split(separator: "\n").map { ($0 as Substring).split(separator: "/").last.map(String.init) ?? "" })
+        guard url.pathExtension.lowercased() == "zip", let archive = try? ZipArchive(url: url, maxEntries: maxEntries) else { return nil }
+        // At the top level or in the only folder, where the import looks.
+        let names = Set(archive.entries.filter { !$0.isMetadata && $0.components.count <= 2 }.compactMap { $0.components.last })
         return ForeignWallpaper.manifest(in: names)?.source
     }
+
+    /// Lively web wallpapers can hold many files; only the manifest and one media file are ever read.
+    static let maxEntries = 4096
 
     @MainActor static func importWallpaper(at url: URL, manifest source: ForeignWallpaper.Source, library: LibraryModel,
                                            display: CGSize) async throws -> LibraryItem {
         let work = try library.makeWorkFolder()
-        defer { try? FileManager.default.removeItem(at: work) }
+        defer { LibraryModel.removeWork(work) }
         let manifestName = source == .lively ? ForeignWallpaper.livelyManifest : ForeignWallpaper.wallpaperEngineManifest
-        let folder = try await Task.detached { try PackageInstaller.root(for: url, work: work, manifests: [manifestName]) }.value
         let displayName = url.deletingPathExtension().lastPathComponent
-        guard let data = try? Data(contentsOf: folder.appendingPathComponent(manifestName)),
+        // Lively's paths may be four folders deep, inside the archive's one top folder.
+        let folder = try await PackageInstaller.background {
+            try PackageSource.open(url, work: work, manifests: [manifestName], maxEntries: maxEntries, maxDepth: 5)
+        }
+        guard let data = try? folder.read(manifestName, limit: ForeignWallpaper.manifestBytes),
               let wallpaper = ForeignWallpaper.parse(data, source: source, folderName: displayName)
         else { throw Failure.unreadable(displayName) }
         let file: String
@@ -55,11 +59,16 @@ enum ForeignImporter {
         case .success(let path): file = path
         case .failure(let reason): throw Failure.unsupported(wallpaper.title, reason)
         }
-        // The file must really be inside the folder, after following any links.
-        let media = folder.appendingPathComponent(file).resolvingSymlinksInPath()
-        let base = folder.resolvingSymlinksInPath().path + "/"
-        var isFolder: ObjCBool = false
-        guard media.path.hasPrefix(base), FileManager.default.fileExists(atPath: media.path, isDirectory: &isFolder), !isFolder.boolValue else {
+        // The file must be a plain file inside the wallpaper, after following any links.
+        let limit = wallpaper.kind == .picture ? PackageLimits.imageBytes : PackageLimits.videoBytes
+        let media: URL
+        do {
+            media = try await PackageInstaller.background { try folder.file(file, work: work, limit: limit) }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as PackageSource.Failure where failure == .tooLarge {
+            throw failure
+        } catch {
             throw Failure.missingFile(wallpaper.title)
         }
 
@@ -69,7 +78,9 @@ enum ForeignImporter {
             item = try await importGIF(media, library: library, display: display, name: wallpaper.title)
         case .picture:
             let location = library.location
-            item = try await Task.detached { try LibraryModel.makeStillItem(from: media, in: location, display: display) }.value
+            item = try await PackageInstaller.background {
+                try LibraryModel.makeStillItem(from: media, in: location, display: display, allowedTypes: LibraryModel.packageImageTypes)
+            }
         default:
             item = try await LibraryModel.makeItem(from: media, in: library.location, display: display)
         }
@@ -83,7 +94,7 @@ enum ForeignImporter {
     /// Converts an animated GIF to video once; a single-frame GIF becomes a still picture.
     @MainActor static func importGIF(_ url: URL, library: LibraryModel, display: CGSize, name: String?) async throws -> LibraryItem {
         let work = try library.makeWorkFolder()
-        defer { try? FileManager.default.removeItem(at: work) }
+        defer { LibraryModel.removeWork(work) }
         let converted = work.appendingPathComponent("\(url.deletingPathExtension().lastPathComponent).mov")
         do {
             try await Task.detached(priority: .userInitiated) { try GIFConverter.convert(url, to: converted) }.value

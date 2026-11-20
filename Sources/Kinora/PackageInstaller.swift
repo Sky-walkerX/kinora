@@ -38,98 +38,53 @@ enum PackageInstaller {
     /// gallery rules then apply.
     @MainActor static func install(_ url: URL, into library: LibraryModel, expected: GalleryEntry? = nil) async throws -> LibraryItem {
         let work = try library.makeWorkFolder()
-        defer { try? FileManager.default.removeItem(at: work) }
-        let root = try await Task.detached { try packageRoot(for: url, work: work) }.value
+        defer { LibraryModel.removeWork(work) }
+        let source = try await background {
+            try PackageSource.open(url, work: work, manifests: [PackageManifest.fileName], maxEntries: 64, maxDepth: 2)
+        }
 
-        let manifestURL = root.appendingPathComponent(PackageManifest.fileName)
-        guard let size = fileSize(manifestURL) else { throw Failure.invalid(.noManifest) }
-        guard size <= PackageLimits.manifestBytes else { throw Failure.invalid(.manifestTooLarge) }
         let manifest: PackageManifest
         do {
-            manifest = try PackageValidation.manifest(try Data(contentsOf: manifestURL), kinoraVersion: kinoraVersion)
-            try PackageValidation.files(try listing(root), for: manifest)
+            let data = try source.read(PackageManifest.fileName, limit: PackageLimits.manifestBytes)
+            manifest = try PackageValidation.manifest(data, kinoraVersion: kinoraVersion)
+            try PackageValidation.files(source.listing(), for: manifest)
             if let expected {
                 try PackageValidation.galleryLicense(manifest)
-                guard manifest.id == expected.id, manifest.license == expected.license else { throw Failure.wrongPackage }
+                guard manifest.id == expected.id, manifest.version == expected.version, manifest.license == expected.license else {
+                    throw Failure.wrongPackage
+                }
             }
         } catch let problem as PackageProblem {
             throw Failure.invalid(problem)
         }
+        try Task.checkCancellation()
 
-        let existing = library.items.first { $0.packageID == manifest.id }
-        var item = try await makeItem(manifest, root: root, library: library, id: existing?.id ?? UUID())
+        // A package replaces the one installed from the same place: the gallery's from the
+        // gallery, a file's from a file. A file never silently takes over a gallery item.
+        let origin = expected.map { "gallery:\($0.sha256)" } ?? "file"
+        let existing = library.items.first { $0.packageID == manifest.id && ($0.packageOrigin ?? "file").hasPrefix(expected == nil ? "file" : "gallery:") }
+        var item = try await makeItem(manifest, source: source, work: work, library: library, id: existing?.id ?? UUID())
+        try Task.checkCancellation()
         item.attribution = LibraryItem.Attribution(author: manifest.author.name, license: manifest.license,
                                                    source: manifest.source ?? manifest.author.url)
         if let attribution = manifest.attribution, !attribution.isEmpty { item.attribution?.author = attribution }
         item.packageID = manifest.id
         item.packageVersion = manifest.version
+        item.packageOrigin = origin
         if let existing { library.replace(existing, with: item) } else { library.add(item) }
         return item
     }
 
-    // MARK: - Reading the package
-
-    /// The folder holding `wallpaper.json`: the folder itself, or a zip extracted into `work`.
-    static func packageRoot(for url: URL, work: URL) throws -> URL {
-        try root(for: url, work: work, manifests: [PackageManifest.fileName])
-    }
-
-    /// The folder holding one of `manifests`: the folder itself, or a zip measured and then
-    /// extracted into `work`, at its top level or in its only folder.
-    static func root(for url: URL, work: URL, manifests: [String]) throws -> URL {
-        var isFolder: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { throw Failure.invalid(.noManifest) }
-        if isFolder.boolValue { return url }
-        guard let bytes = fileSize(url), bytes <= PackageLimits.totalBytes else { throw Failure.archiveTooLarge }
-        // Measure first: a small zip can hold gigabytes, or thousands of entries.
-        let info = Shell.run("/usr/bin/zipinfo", ["-t", url.path])
-        guard info.status == 0, let measured = parseZipTotals(info.output) else { throw Failure.cannotExtract }
-        guard measured.files <= 32, measured.bytes <= PackageLimits.totalBytes else { throw Failure.archiveTooLarge }
-        let destination = work.appendingPathComponent("extracted", isDirectory: true)
-        guard Shell.run("/usr/bin/ditto", ["-x", "-k", url.path, destination.path]).status == 0 else { throw Failure.cannotExtract }
-        // No links anywhere in what came out, so nothing can point outside the package.
-        if let walker = FileManager.default.enumerator(at: destination, includingPropertiesForKeys: [.isSymbolicLinkKey]) {
-            for case let entry as URL in walker where (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
-                throw Failure.invalid(.unsafeFile(entry.lastPathComponent))
-            }
-        }
-        func holdsManifest(_ folder: URL) -> Bool {
-            manifests.contains { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
-        }
-        if holdsManifest(destination) { return destination }
-        let children = ((try? FileManager.default.contentsOfDirectory(atPath: destination.path)) ?? []).filter { $0 != "__MACOSX" }
-        if children.count == 1 {
-            let inner = destination.appendingPathComponent(children[0], isDirectory: true)
-            if holdsManifest(inner) { return inner }
-        }
-        throw Failure.invalid(.noManifest)
-    }
-
-    static func parseZipTotals(_ output: String) -> (files: Int, bytes: Int64)? {
-        PackageArchive.zipTotals(output).map { ($0.files, $0.bytes) }
-    }
-
-    /// The package folder's entries as the validator sees them. Folders, links and programs
-    /// are reported so it can refuse them.
-    static func listing(_ root: URL) throws -> [PackageFile] {
-        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
-        let entries = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: keys, options: [])
-        return entries.filter { $0.lastPathComponent != ".DS_Store" }.map { entry in
-            let values = try? entry.resourceValues(forKeys: Set(keys))
-            let permissions = ((try? FileManager.default.attributesOfItem(atPath: entry.path))?[.posixPermissions] as? NSNumber)?.intValue ?? 0
-            return PackageFile(name: entry.lastPathComponent, bytes: Int64(values?.fileSize ?? 0),
-                               isRegularFile: values?.isRegularFile == true, isSymbolicLink: values?.isSymbolicLink == true,
-                               isExecutable: permissions & 0o111 != 0)
-        }
-    }
-
-    static func fileSize(_ url: URL) -> Int64? {
-        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value
+    /// Runs blocking file work off the main actor but in the calling task, so cancelling the
+    /// task (the gallery's Cancel button) reaches it, unlike work in a detached task.
+    static func background<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
+        try body()
     }
 
     // MARK: - Making the library item
 
-    @MainActor static func makeItem(_ manifest: PackageManifest, root: URL, library: LibraryModel, id: UUID) async throws -> LibraryItem {
+    @MainActor static func makeItem(_ manifest: PackageManifest, source: PackageSource, work: URL, library: LibraryModel,
+                                    id: UUID) async throws -> LibraryItem {
         let location = library.location
         let fm = FileManager.default
         try fm.createDirectory(at: location.mediaFolder, withIntermediateDirectories: true)
@@ -151,17 +106,21 @@ enum PackageInstaller {
             return item
         case .video:
             guard let file = manifest.video?.file else { throw Failure.invalid(.invalidField("video.file")) }
-            let source = root.appendingPathComponent(file)
-            try await checkVideo(source)
-            var item = try await LibraryModel.makeItem(from: source, in: location, display: VideoOptimizer.largestDisplayPixels(), id: id,
+            let media = try await background { try source.file(file, work: work, limit: PackageLimits.videoBytes) }
+            try await checkVideo(media)
+            var item = try await LibraryModel.makeItem(from: media, in: location, display: VideoOptimizer.largestDisplayPixels(), id: id,
                                                        stem: stem)
             item.name = manifest.name
             item.kind = .package
             return item
         case .image:
             guard let file = manifest.image?.file else { throw Failure.invalid(.invalidField("image.file")) }
-            var item = try LibraryModel.makeStillItem(from: root.appendingPathComponent(file), in: location,
-                                                      display: VideoOptimizer.largestDisplayPixels(), id: id, stem: stem)
+            let display = VideoOptimizer.largestDisplayPixels()
+            var item = try await background {
+                let media = try source.file(file, work: work, limit: PackageLimits.imageBytes)
+                return try LibraryModel.makeStillItem(from: media, in: location, display: display, id: id, stem: stem,
+                                                      allowedTypes: LibraryModel.packageImageTypes)
+            }
             item.name = manifest.name
             item.kind = .package
             return item
@@ -170,8 +129,11 @@ enum PackageInstaller {
 
     /// A video Kinora will play: openable, with a video track, at most 8K and ten minutes.
     static func checkVideo(_ url: URL) async throws {
-        let asset = AVURLAsset(url: url)
-        guard (try? await asset.load(.isPlayable)) == true,
+        let asset = LibraryModel.localAsset(url)
+        let playable: Bool
+        do { playable = try await asset.load(.isPlayable) } catch is CancellationError { throw CancellationError() } catch { playable = false }
+        try Task.checkCancellation()
+        guard playable,
               let track = try? await asset.loadTracks(withMediaType: .video).first,
               let size = try? await track.load(.naturalSize),
               let duration = try? await asset.load(.duration),

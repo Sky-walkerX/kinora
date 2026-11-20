@@ -98,12 +98,19 @@ public enum GalleryValidation {
               !entry.author.trimmingCharacters(in: .whitespaces).isEmpty, entry.author.count <= PackageLimits.authorLength,
               RedistributableLicenses.all.contains(entry.license),
               isAllowed(entry.download), entry.preview.map(isAllowed) ?? true,
-              entry.source.map({ $0.scheme?.lowercased() == "https" }) ?? true,
+              entry.source.map({ $0.scheme?.lowercased() == "https" && $0.host != nil && $0.user == nil && $0.password == nil }) ?? true,
+              [entry.name, entry.author, entry.summary ?? "", entry.attribution ?? ""].allSatisfy(isPlainText),
+              (entry.summary ?? "").count <= PackageLimits.summaryLength, (entry.attribution ?? "").count <= PackageLimits.attributionLength,
               isSHA256(entry.sha256), entry.bytes > 0, entry.bytes <= PackageLimits.totalBytes
         else { return false }
         if RedistributableLicenses.needingAttribution.contains(entry.license),
            (entry.attribution ?? "").trimmingCharacters(in: .whitespaces).isEmpty { return false }
         return true
+    }
+
+    /// Text shown as is: no control or formatting characters, which could reorder or hide what follows.
+    public static func isPlainText(_ text: String) -> Bool {
+        !text.unicodeScalars.contains { $0.properties.generalCategory == .control || $0.properties.generalCategory == .format }
     }
 
     public static func isSHA256(_ text: String) -> Bool {

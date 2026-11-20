@@ -33,7 +33,8 @@ import Observation
         var request = URLRequest(url: Self.latestRelease)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         do {
-            let (data, response) = try await GalleryModel.session.data(for: request, delegate: RedirectGuard())
+            // GitHub's API answers a renamed repository with a redirect to itself.
+            let (data, response) = try await GalleryModel.session.data(for: request, delegate: RedirectGuard(allowing: ["api.github.com"]))
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 404 { state = .noReleases; return }
             guard status == 200, data.count < 1_000_000 else { state = .failed; return }

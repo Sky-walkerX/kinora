@@ -3,6 +3,7 @@
 
 import CryptoKit
 import Foundation
+import ImageIO
 import KinoraKit
 import Observation
 import SwiftUI
@@ -22,6 +23,10 @@ import SwiftUI
     private(set) var state: State = .idle
     /// Download progress by entry, 0...1.
     private(set) var downloads: [String: Double] = [:]
+    /// Entries downloaded and now being checked and installed; that part can't be cancelled.
+    private(set) var installing: Set<String> = []
+    /// Preview pictures already fetched, by URL, so scrolling doesn't fetch them again.
+    private var previews: [URL: CGImage] = [:]
     var lastError: String?
     private var tasks: [String: Task<Void, Never>] = [:]
     let catalogURL: URL
@@ -65,24 +70,32 @@ import SwiftUI
             defer {
                 tasks[entry.id] = nil
                 downloads[entry.id] = nil
+                installing.remove(entry.id)
             }
             do {
                 let folder = try library.makeWorkFolder()
-                defer { try? FileManager.default.removeItem(at: folder) }
+                defer { LibraryModel.removeWork(folder) }
                 let file = folder.appendingPathComponent("package.kinorawallpaper")
                 try await Self.download(entry, to: file) { [weak self] value in
                     Task { @MainActor in if self?.downloads[entry.id] != nil { self?.downloads[entry.id] = value } }
                 }
                 try Task.checkCancellation()
+                installing.insert(entry.id)
                 _ = try await PackageInstaller.install(file, into: library, expected: entry)
             } catch is CancellationError {
                 // Cancelled by the user; the partial file went with the work folder.
+            } catch let error as URLError where error.code == .cancelled {
+                // URLSession reports a cancelled download this way.
             } catch let failure as PackageInstaller.Failure {
                 lastError = failure.errorDescription
             } catch DownloadFailure.checksum {
                 lastError = "“\(entry.name)” didn't download correctly, so Kinora didn't install it. Try again."
             } catch DownloadFailure.tooLarge {
                 lastError = "“\(entry.name)” is larger than the gallery said, so Kinora stopped the download."
+            } catch let failure as PackageSource.Failure {
+                lastError = "Kinora couldn't install “\(entry.name)”. \(failure.errorDescription ?? "")"
+            } catch let problem as PackageProblem {
+                lastError = "Kinora couldn't install “\(entry.name)”. \(problem.description)"
             } catch {
                 lastError = "Kinora couldn't download “\(entry.name)”. Check your connection and try again."
             }
@@ -90,7 +103,23 @@ import SwiftUI
     }
 
     func cancel(_ entry: GalleryEntry) {
+        guard !installing.contains(entry.id) else { return }
         tasks[entry.id]?.cancel()
+    }
+
+    /// An entry's preview picture, fetched by the same rules as everything else in the gallery:
+    /// GitHub only, no cookies or cache, at most 10 MB, decoded no larger than shown.
+    func preview(_ url: URL) async -> CGImage? {
+        if let cached = previews[url] { return cached }
+        guard let (data, response) = try? await Self.fetch(url, limit: PackageLimits.previewBytes), response.statusCode == 200,
+              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let type = CGImageSourceGetType(source) as String?, LibraryModel.packageImageTypes.contains(type),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 720,
+              ] as CFDictionary) else { return nil }
+        previews[url] = image
+        return image
     }
 
     // MARK: - Network
@@ -153,11 +182,20 @@ import SwiftUI
 
 enum DownloadFailure: Error { case checksum, tooLarge, badResponse, notAllowed }
 
-/// Refuses redirects to hosts outside the gallery's.
+/// Refuses redirects to hosts outside the gallery's, plus any `extraHosts`.
 final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    let extraHosts: Set<String>
+
+    init(allowing extraHosts: Set<String> = []) {
+        self.extraHosts = extraHosts
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
-        guard let url = request.url, GalleryValidation.isAllowed(url) else { return nil }
+        guard let url = request.url else { return nil }
+        if GalleryValidation.isAllowed(url) { return request }
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil, (url.port ?? 443) == 443,
+              let host = url.host?.lowercased(), extraHosts.contains(host) else { return nil }
         return request
     }
 }
@@ -174,7 +212,7 @@ struct GalleryPage: View {
                 ContentUnavailableView {
                     Label("Wallpapers Free to Share", systemImage: "square.grid.2x2")
                 } description: {
-                    Text("The gallery lists wallpapers whose makers allow them to be shared, from NASA, ESA, Wikimedia Commons and others, each with its credit and license. Browsing connects to GitHub, where the gallery is kept; nothing is downloaded until you choose it.")
+                    Text("The gallery lists wallpapers whose makers allow them to be shared, from NASA, ESA, Wikimedia Commons and others, each with its credit and license. Browsing connects to GitHub, where the gallery is kept, to list the wallpapers and show their previews. Nothing is added to your library until you choose it.")
                 } actions: {
                     Button("Browse the Gallery") { gallery.load() }
                         .buttonStyle(.glassProminent)
@@ -236,7 +274,7 @@ private struct GalleryCard: View {
                 .aspectRatio(16 / 10, contentMode: .fit)
                 .overlay {
                     if let preview = entry.preview {
-                        AsyncImage(url: preview) { image in image.resizable().scaledToFill() } placeholder: { ProgressView() }
+                        GalleryPreview(url: preview)
                     } else {
                         Image(systemName: "photo").foregroundStyle(.secondary)
                     }
@@ -264,18 +302,50 @@ private struct GalleryCard: View {
     }
 
     @ViewBuilder private var action: some View {
-        if let progress = gallery.downloads[entry.id] {
+        // Only a copy installed from the gallery counts; a file with the same id is someone else's.
+        let installed = library.items.first { $0.packageID == entry.id && ($0.packageOrigin ?? "").hasPrefix("gallery:") }
+        if gallery.installing.contains(entry.id) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Installing…").font(.caption).foregroundStyle(.secondary)
+            }
+        } else if let progress = gallery.downloads[entry.id] {
             HStack(spacing: 6) {
                 ProgressView(value: progress).frame(width: 60)
                 Button("Cancel", systemImage: "xmark.circle.fill") { gallery.cancel(entry) }
                     .labelStyle(.iconOnly).buttonStyle(.borderless)
             }
-        } else if let installed = library.items.first(where: { $0.packageID == entry.id }), installed.packageVersion == entry.version {
+        } else if let installed, installed.packageVersion == entry.version {
             Label("In Library", systemImage: "checkmark").labelStyle(.titleAndIcon).font(.caption).foregroundStyle(.secondary)
         } else {
-            Button(library.items.contains { $0.packageID == entry.id } ? "Update" : "Get") { gallery.download(entry, into: library) }
+            Button(installed != nil ? "Update" : "Get") { gallery.download(entry, into: library) }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+        }
+    }
+}
+
+/// A gallery entry's preview, loaded through the gallery's own rules rather than the system's
+/// shared session, which would follow redirects anywhere and keep cookies and a cache.
+private struct GalleryPreview: View {
+    @Environment(GalleryModel.self) private var gallery
+    let url: URL
+    @State private var image: CGImage?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(decorative: image, scale: 1).resizable().scaledToFill()
+            } else if failed {
+                Image(systemName: "photo").foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+            }
+        }
+        .task(id: url) {
+            image = await gallery.preview(url)
+            failed = image == nil
         }
     }
 }

@@ -76,6 +76,9 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
     /// The package it was installed from, so installing a newer version replaces it.
     public var packageID: String?
     public var packageVersion: String?
+    /// Where the package came from: `file`, or `gallery:<sha256>` for a verified gallery download.
+    /// A package from a file never replaces one from the gallery, or the other way round.
+    public var packageOrigin: String?
 
     /// How the plug-in draws it.
     public var isStill: Bool { still == true }

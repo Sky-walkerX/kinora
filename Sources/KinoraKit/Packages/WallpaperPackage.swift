@@ -322,7 +322,10 @@ public enum PackageValidation {
             throw PackageProblem.invalidField("license")
         }
         for (url, field) in [(m.source, "source"), (m.author.url, "author.url")] {
-            if let url, url.scheme?.lowercased() != "https" || url.host == nil { throw PackageProblem.invalidField(field) }
+            // No user name in a link: "https://nasa.gov@example.com" would read as nasa.gov.
+            if let url, url.scheme?.lowercased() != "https" || url.host == nil || url.user != nil || url.password != nil {
+                throw PackageProblem.invalidField(field)
+            }
         }
         if let tags = m.tags {
             guard tags.count <= PackageLimits.tagCount, tags.allSatisfy({ !$0.isEmpty && $0.count <= PackageLimits.tagLength }) else {
@@ -371,22 +374,4 @@ public struct Version: Comparable, Sendable {
     }
 
     public static func == (a: Version, b: Version) -> Bool { !(a < b) && !(b < a) }
-}
-
-/// Facts about a package's zip, measured before it is opened.
-public enum PackageArchive {
-    public struct Totals: Equatable, Sendable {
-        public var files: Int
-        public var bytes: Int64
-    }
-
-    /// The totals line `zipinfo -t` prints: "3 files, 20512 bytes uncompressed, 20000 bytes compressed:  2.5%".
-    public static func zipTotals(_ output: String) -> Totals? {
-        guard let line = output.split(separator: "\n").last(where: { $0.contains("bytes uncompressed") }) else { return nil }
-        let words = line.split(separator: " ").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ",")) }
-        guard let files = words.first.flatMap({ Int($0) }), files >= 0,
-              let index = words.firstIndex(where: { $0.hasPrefix("uncompressed") }), index >= 2,
-              let bytes = Int64(words[index - 2]), bytes >= 0 else { return nil }
-        return Totals(files: files, bytes: bytes)
-    }
 }

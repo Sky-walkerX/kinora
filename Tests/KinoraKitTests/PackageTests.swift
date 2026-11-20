@@ -188,16 +188,6 @@ import Testing
     }
 }
 
-@Suite struct PackageArchiveTests {
-    @Test func readsZipinfoTotals() {
-        #expect(PackageArchive.zipTotals("Archive:  x.zip\nZip file size: 1 bytes\n3 files, 20512 bytes uncompressed, 20000 bytes compressed:  2.5%\n")
-                == PackageArchive.Totals(files: 3, bytes: 20512))
-        #expect(PackageArchive.zipTotals("1 file, 9 bytes uncompressed, 9 bytes compressed:  0.0%") == PackageArchive.Totals(files: 1, bytes: 9))
-        #expect(PackageArchive.zipTotals("Empty zipfile.") == nil)
-        #expect(PackageArchive.zipTotals("x files, y bytes uncompressed") == nil)
-    }
-}
-
 @Suite struct ReleaseCheckTests {
     func answer(_ fields: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: fields) }
 

@@ -56,6 +56,10 @@ import UniformTypeIdentifiers
                 lastError = failure.errorDescription
             } catch let failure as ForeignImporter.Failure {
                 lastError = failure.errorDescription
+            } catch let failure as PackageSource.Failure {
+                lastError = "Kinora can't import “\(url.lastPathComponent)”. \(failure.errorDescription ?? "")"
+            } catch let problem as PackageProblem {
+                lastError = "This isn't a wallpaper Kinora can install. \(problem.description)"
             } catch {
                 rejected.append(url.lastPathComponent)
             }
@@ -115,7 +119,7 @@ import UniformTypeIdentifiers
         item.attribution = LibraryItem.Attribution(author: "Apple", license: "Included with macOS; not redistributed by Kinora")
         do {
             try FileManager.default.createDirectory(at: location.thumbnailFolder, withIntermediateDirectories: true)
-            try await Self.writeThumbnail(of: AVURLAsset(url: location.mediaURL(for: item)), to: location.thumbnailURL(for: item))
+            try await Self.writeThumbnail(of: Self.localAsset(location.mediaURL(for: item)), to: location.thumbnailURL(for: item))
             items.append(item)
             save()
         } catch {
@@ -191,8 +195,28 @@ import UniformTypeIdentifiers
 
     /// Removes work a previous run left unfinished, such as a Living Photo cancelled by quitting.
     private func clearWork() {
-        try? FileManager.default.removeItem(at: location.workFolder)
+        Self.removeWork(location.workFolder)
     }
+
+    /// Deletes a work folder, first making anything in it that refuses deletion deletable.
+    nonisolated static func removeWork(_ folder: URL) {
+        let fm = FileManager.default
+        if (try? fm.removeItem(at: folder)) != nil || !fm.fileExists(atPath: folder.path) { return }
+        if let walker = fm.enumerator(at: folder, includingPropertiesForKeys: nil) {
+            for case let url as URL in walker { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path) }
+        }
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        try? fm.removeItem(at: folder)
+    }
+
+    /// A local media file, opened so it can't pull in other files: a QuickTime reference movie
+    /// in a package could otherwise point Kinora at any video on the Mac.
+    nonisolated static func localAsset(_ url: URL) -> AVURLAsset {
+        AVURLAsset(url: url, options: [AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue])
+    }
+
+    /// Picture formats a package or imported wallpaper may hold, checked by content, not name.
+    nonisolated static let packageImageTypes: Set<String> = [UTType.jpeg.identifier, UTType.png.identifier, UTType.heic.identifier, "public.heif"]
 
     /// A fresh folder for one piece of work, inside the library so moving its result is cheap.
     func makeWorkFolder() throws -> URL {
@@ -247,7 +271,7 @@ import UniformTypeIdentifiers
     /// file is pointed at a half-written one.
     static func makeItem(from source: URL, in location: LibraryLocation, display: CGSize, id: UUID = UUID(),
                          stem: String? = nil, thumbnailName: String? = nil, optimize: Bool = true) async throws -> LibraryItem {
-        let asset = AVURLAsset(url: source)
+        let asset = localAsset(source)
         guard try await asset.load(.isPlayable), try await !asset.loadTracks(withMediaType: .video).isEmpty else {
             throw CocoaError(.fileReadCorruptFile)
         }
@@ -277,7 +301,7 @@ import UniformTypeIdentifiers
         item.originalBytes = originalBytes
         item.storedBytes = Self.fileSize(location.mediaURL(for: item))
         do {
-            try await writeThumbnail(of: AVURLAsset(url: location.mediaURL(for: item)), to: location.thumbnailURL(for: item))
+            try await writeThumbnail(of: localAsset(location.mediaURL(for: item)), to: location.thumbnailURL(for: item))
         } catch {
             try? fm.removeItem(at: location.mediaURL(for: item))
             throw error
@@ -288,8 +312,9 @@ import UniformTypeIdentifiers
     /// Imports a still picture: kept as it is when it suits the display, else stored once at
     /// the display's size as HEIC. Shown without any video decoding.
     nonisolated static func makeStillItem(from source: URL, in location: LibraryLocation, display: CGSize, id: UUID = UUID(),
-                                          stem: String? = nil, thumbnailName: String? = nil) throws -> LibraryItem {
+                                          stem: String? = nil, thumbnailName: String? = nil, allowedTypes: Set<String>? = nil) throws -> LibraryItem {
         guard let image = CGImageSourceCreateWithURL(source as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              allowedTypes.map({ allowed in (CGImageSourceGetType(image) as String?).map(allowed.contains) ?? false }) ?? true,
               let properties = CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [CFString: Any],
               let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
               let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,

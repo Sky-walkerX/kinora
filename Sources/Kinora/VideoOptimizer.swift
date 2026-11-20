@@ -18,7 +18,7 @@ enum VideoOptimizer {
 
     /// Writes the optimized video to `destination`.
     static func optimize(_ source: URL, to destination: URL, display: CGSize) async throws {
-        let asset = AVURLAsset(url: source)
+        let asset = LibraryModel.localAsset(source)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw Failure.noVideoTrack }
         let (natural, transform, rate) = try await track.load(.naturalSize, .preferredTransform, .nominalFrameRate)
         // Size the picture as it will be seen, then hand the writer the unrotated dimensions.
