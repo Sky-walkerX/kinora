@@ -17,7 +17,9 @@ import KinoraKit
     let gallery = GalleryModel()
     let updates = UpdateChecker()
 
-    private init() {}
+    private init() {
+        wallpaper.library = library
+    }
 }
 
 /// What can be done to Kinora from outside its window: the menu bar, Shortcuts and links.

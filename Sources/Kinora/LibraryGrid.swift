@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Kinora Contributors
 
 import KinoraKit
+import KinoraRender
 import SwiftUI
 
 /// The user's wallpapers.
@@ -54,6 +55,7 @@ struct LibraryPage: View {
 struct LibraryGrid: View {
     @Environment(LibraryModel.self) private var library
     @Environment(WallpaperController.self) private var wallpaper
+    @Environment(\.colorScheme) private var colorScheme
     let items: [LibraryItem]
     @Binding var selection: UUID?
     /// Set inside a playlist, which offers "Remove from Playlist" as well.
@@ -81,7 +83,7 @@ struct LibraryGrid: View {
 
     private func tile(_ item: LibraryItem) -> some View {
         LibraryTile(item: item, thumbnail: library.thumbnailURL(item), isSelected: selection == item.id,
-                    isCurrent: wallpaper.currentItem == item.id)
+                    isCurrent: wallpaper.shownItem(dark: colorScheme == .dark) == item.id)
             .onTapGesture { selection = item.id }
             .simultaneousGesture(TapGesture(count: 2).onEnded { Task { await wallpaper.use(item) } })
             .contextMenu {
@@ -163,7 +165,9 @@ private struct RemovalConfirmation: ViewModifier {
     }
 
     private func remove(_ item: LibraryItem) async {
-        let replacement = library.items.first { $0.id != item.id }?.id
+        // Another library item, else an original, which needs no files.
+        let originals = OriginalRenderer.shared == nil ? [] : KinoraOriginals.all.map(\.id)
+        let replacement = library.items.first { $0.id != item.id }?.id ?? originals.first
         guard await wallpaper.forget(item.id, replacement: replacement) else {
             wallpaper.lastError = "“\(item.name)” is the only wallpaper Kinora is showing. Add another one first, or use Restore Original Wallpaper."
             return

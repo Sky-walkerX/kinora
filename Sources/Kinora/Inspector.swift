@@ -58,11 +58,22 @@ struct Inspector: View {
 
             if wallpaper.followsSelection, let rules = wallpaper.selection?.rules {
                 variants(rules)
+            } else if let current = wallpaper.currentItem {
+                // Picked in System Settings: one wallpaper, no variants until Kinora manages it.
+                Section {
+                    Button("Manage in Kinora") { Task { await wallpaper.use(itemID: current) } }
+                        .disabled(wallpaper.working)
+                } header: {
+                    Text("Your Wallpaper")
+                } footer: {
+                    Text("You picked this wallpaper in System Settings. To give the Lock Screen or Dark Mode their own wallpaper, or to rotate or schedule wallpapers, let Kinora manage it. Your screen blinks once while macOS switches over.")
+                }
             }
 
             Section("Status") {
                 plugInRow
                 wallpaperRow
+                lockScreenRow
                 energyRow
             }
 
@@ -98,6 +109,12 @@ struct Inspector: View {
                 Text("Same as Light").tag(UUID?.none)
                 WallpaperChoices()
             }
+            if rules.darkVariantIsOverridden {
+                Text(rules.schedule != nil
+                     ? "The time-of-day schedule is deciding the desktop, so the Dark Mode wallpaper waits."
+                     : "The rotation is deciding the desktop, so the Dark Mode wallpaper waits until it stops.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             LabeledContent("Time of Day") {
                 HStack {
                     Text(scheduleSummary(rules)).foregroundStyle(.secondary)
@@ -126,9 +143,8 @@ struct Inspector: View {
 
     /// Where the shown item appears: the Lock Screen too, unless it has a wallpaper of its own.
     private func placement(of id: UUID) -> String {
-        let lock: UUID? = wallpaper.selection?.rules.lockScreen
-        if lock == nil || lock == id { return "On your desktop and Lock Screen" }
-        return "On your desktop"
+        let lock = wallpaper.shown(.locked, dark: colorScheme == .dark)?.shown
+        return lock == id ? "On your desktop and Lock Screen" : "On your desktop"
     }
 
     private func scheduleSummary(_ rules: WallpaperRules) -> String {
@@ -162,11 +178,22 @@ struct Inspector: View {
         LabeledContent("Current wallpaper") {
             if let current = wallpaper.shownItem(dark: colorScheme == .dark) {
                 Text(name(of: current))
+            } else if wallpaper.shown(dark: colorScheme == .dark)?.dependsOnUnlocks == true {
+                Text("Changes each time you unlock").foregroundStyle(.secondary)
             } else if wallpaper.replacedByOther {
                 Text("Another wallpaper").foregroundStyle(.secondary)
             } else {
                 Text("Not Kinora").foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// The Lock Screen's wallpaper, when it has one of its own.
+    @ViewBuilder private var lockScreenRow: some View {
+        if let lock = wallpaper.shown(.locked, dark: colorScheme == .dark),
+           let lockID = lock.shown, !lock.dependsOnUnlocks,
+           lockID != wallpaper.shownItem(dark: colorScheme == .dark) {
+            LabeledContent("Lock Screen", value: name(of: lockID))
         }
     }
 

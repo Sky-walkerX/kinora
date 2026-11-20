@@ -3,6 +3,7 @@
 
 import Foundation
 import KinoraKit
+import KinoraRender
 import Observation
 
 /// Puts Kinora on the desktop and Lock Screen, keeps the plug-in switched on, and puts the
@@ -24,6 +25,15 @@ import Observation
     private(set) var canRestore = false
     private(set) var working = false
     var lastError: String?
+
+    /// The choice macOS shows, when it is Kinora's.
+    private(set) var configuration: ChoiceConfiguration?
+    /// Moves on whenever the rules change what is shown by themselves (a schedule boundary or a
+    /// rotation step), so views that say what is on screen redraw then.
+    private var clock = Date()
+    private var clockTimer: Timer?
+    /// The library, for working out what the plug-in falls back to when an item is gone.
+    weak var library: LibraryModel?
 
     private let store = WallpaperStoreFiles.current()
     private let location = LibraryLocation.current
@@ -76,9 +86,25 @@ import Observation
         guard let current = try? store.readPrimary() else { return }
         let configuration = ChoiceConfiguration.decode(WallpaperStoreEditor.kinoraConfiguration(current))
         let isKinora = WallpaperStoreEditor.kinoraIsSelected(current)
+        self.configuration = isKinora ? configuration : nil
         followsSelection = isKinora && configuration?.follows == true
         currentItem = isKinora ? configuration?.rules(selection: selection).wallpaper : nil
         replacedByOther = currentItem == nil && canRestore
+        armClock()
+    }
+
+    /// Wakes the views at the next change the rules make by themselves.
+    private func armClock() {
+        clockTimer?.invalidate()
+        clockTimer = nil
+        guard currentItem != nil, let rules = configuration?.rules(selection: selection),
+              let next = rules.nextChange(after: Date()) else { return }
+        clockTimer = Timer.scheduledTimer(withTimeInterval: max(1, next.timeIntervalSinceNow + 0.5), repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.clock = Date()
+                self?.armClock()
+            }
+        }
     }
 
     /// Re-enables or re-registers the plug-in when macOS left it off. Run at every launch.
@@ -153,11 +179,24 @@ import Observation
         return true
     }
 
-    /// The item on the desktop right now, after rotation, schedule and dark mode.
-    func shownItem(dark: Bool, at date: Date = Date()) -> UUID? {
-        guard let currentItem else { return nil }
-        guard followsSelection, let rules = selection?.rules else { return currentItem }
-        return rules.item(for: .default, appearance: dark ? .dark : .light, at: date)
+    /// What a surface shows right now, worked out exactly as the plug-in works it out: rotation,
+    /// schedule, Dark Mode and the Lock Screen, then the plug-in's fallbacks for removed items.
+    /// Nil when Kinora is not the wallpaper.
+    func shown(_ mode: PresentationMode = .default, dark: Bool, at date: Date? = nil) -> SurfaceResolution? {
+        guard currentItem != nil else { return nil }
+        let now = max(clock, date ?? Date())
+        // Only the plug-in counts unlocks; the app works out the rest.
+        return SurfaceResolution.resolve(configuration: configuration, selection: selection, mode: mode,
+                                         appearance: dark ? .dark : .light, at: now, unlockCount: 0,
+                                         library: library?.items.map(\.id) ?? [],
+                                         originalsAvailable: OriginalRenderer.shared != nil)
+    }
+
+    /// The item on the desktop right now. Nil when Kinora is not the wallpaper, or when a rotation
+    /// steps on each unlock, which only the plug-in can count.
+    func shownItem(dark: Bool, at date: Date? = nil) -> UUID? {
+        guard let resolution = shown(dark: dark, at: date), !resolution.dependsOnUnlocks else { return nil }
+        return resolution.shown
     }
 
     /// Changes the live selection. When macOS's choice already follows Kinora, the plug-in picks

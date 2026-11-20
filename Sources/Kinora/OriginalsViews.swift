@@ -51,6 +51,7 @@ struct OriginalPreview: View {
 /// The inspector's section for an original.
 struct OriginalInspectorSection: View {
     @Environment(WallpaperController.self) private var wallpaper
+    @Environment(\.colorScheme) private var colorScheme
     let original: KinoraOriginal
 
     var body: some View {
@@ -65,7 +66,7 @@ struct OriginalInspectorSection: View {
                 Text("Follows the sun where your Mac is, worked out from its time zone. Kinora never asks for your location.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if wallpaper.currentItem == original.id {
+            if wallpaper.shownItem(dark: colorScheme == .dark) == original.id {
                 Label("On your desktop", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
             } else {
                 Button {

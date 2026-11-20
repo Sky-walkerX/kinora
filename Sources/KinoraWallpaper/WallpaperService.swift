@@ -10,6 +10,9 @@ import os
 
 let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper")
 
+/// Where the plug-in keeps its unlock count, in its own sandboxed preferences.
+private let unlockCounterKey = "unlockCounter"
+
 /// The plug-in's state: one surface per wallpaper ID WallpaperAgent acquired, the library they
 /// draw from, and the rules that decide when they play. Runs on the main actor; the XPC
 /// endpoint hops here for every call.
@@ -30,8 +33,9 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
     private var library = LibraryIndex()
     private var selection: KinoraSelection?
     private var settings = PlaybackSettings()
-    /// Unlocks seen since the plug-in started, for rotations that step on every unlock.
-    private var unlockCount = 0
+    /// Unlocks counted for a rotation that steps on every unlock, once per lock however many
+    /// surfaces report it, and kept across restarts in the plug-in's own preferences.
+    private var unlocks = UnlockCounter.decode(UserDefaults.standard.data(forKey: unlockCounterKey)) ?? UnlockCounter()
     private var changeTimer: Timer?
     private let conditions = SystemConditions()
     /// Roughly where the Mac is, from its time zone, for the live sky. Never asks for location.
@@ -58,6 +62,8 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
 
     func acquire(id: String, request: WallpaperCreationRequest) -> UInt32? {
         records[id]?.surface.tearDown()
+        // A plug-in started while the Mac is locked learns it from the surfaces it acquires.
+        countUnlock(from: nil, to: request.presentationMode)
         guard let surface = WallpaperSurface(destination: request.destination) else {
             log.error("acquire \(id, privacy: .public): no remote context on this macOS")
             return nil
@@ -77,8 +83,8 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
         guard var record = records[id] else { return false }
         if record.presentation == .locked, request.presentationMode == .default {
             record.unlockedAt = Date()
-            unlockCount += 1
         }
+        countUnlock(from: record.presentation, to: request.presentationMode)
         let contentMayChange = record.presentation != request.presentationMode || record.appearance != request.systemAppearance
         record.presentation = request.presentationMode
         record.activity = request.activityState
@@ -125,9 +131,17 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
 
     // MARK: - Content and playback
 
+    private func countUnlock(from old: PresentationMode?, to new: PresentationMode) {
+        guard unlocks.surface(from: old, to: new) else { return }
+        UserDefaults.standard.set(unlocks.encoded(), forKey: unlockCounterKey)
+    }
+
     private func reloadLibrary() {
         if let data = try? Data(contentsOf: location.index), let index = LibraryIndex.decode(data) { library = index }
         selection = (try? Data(contentsOf: location.selection)).flatMap(KinoraSelection.decode)
+        if unlocks.follow(selection?.rules.rotation) {
+            UserDefaults.standard.set(unlocks.encoded(), forKey: unlockCounterKey)
+        }
         if let data = try? Data(contentsOf: location.settings), let decoded = try? JSONDecoder().decode(PlaybackSettings.self, from: data) {
             settings = decoded
         }
@@ -140,7 +154,8 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
     private func refreshContent() {
         for id in records.keys { showContent(for: id) }
         let now = Date()
-        let next = records.values.compactMap { $0.configuration?.rules(selection: selection).nextChange(after: now) }.min()
+        // Previews carry no configuration and follow Kinora's selection, so they count too.
+        let next = records.values.compactMap { ($0.configuration?.rules(selection: selection) ?? selection?.rules)?.nextChange(after: now) }.min()
         changeTimer?.invalidate()
         changeTimer = next.map { date in
             Timer.scheduledTimer(withTimeInterval: max(1, date.timeIntervalSinceNow + 0.5), repeats: false) { [weak self] _ in
@@ -153,21 +168,18 @@ let log = Logger(subsystem: "io.github.sky-walkerx.kinora", category: "wallpaper
     /// configuration, so it shows Kinora's current selection, or the first item.
     private func showContent(for id: String) {
         guard let record = records[id] else { return }
-        let rules = record.configuration?.rules(selection: selection) ?? selection?.rules
-        let wanted = rules?.item(for: record.presentation, appearance: record.appearance, at: Date(), unlockCount: unlockCount)
+        let metal = OriginalRenderer.shared != nil
+        let resolution = SurfaceResolution.resolve(configuration: record.configuration, selection: selection,
+                                                   mode: record.presentation, appearance: record.appearance, at: Date(),
+                                                   unlockCount: unlocks.count, library: library.items.map(\.id),
+                                                   originalsAvailable: metal)
         // An item deleted from the library falls back to another one the rules name, then
         // Kinora's own selection, then any item, so the surface never goes blank.
-        var fallbacks: [UUID] = []
-        if let main = selection?.rules.wallpaper { fallbacks.append(main) }
-        fallbacks.append(contentsOf: library.items.map(\.id))
-        let metal = OriginalRenderer.shared != nil
-        if metal { fallbacks.append(contentsOf: KinoraOriginals.all.map(\.id)) }
-        let available = Set(library.items.map(\.id))
-        let exists: (UUID) -> Bool = { available.contains($0) || (metal && KinoraOriginals.isOriginal($0)) }
-        guard let resolved = ContentResolution.item(wanted: wanted, rules: rules, fallbacks: fallbacks, exists: exists) else {
+        guard let resolved = resolution.shown else {
             log.error("surface \(id, privacy: .public) has nothing to show")
             return
         }
+        let wanted = resolution.wanted
         if let wanted, wanted != resolved {
             log.notice("surface \(id, privacy: .public) wanted \(wanted.uuidString, privacy: .public), which is gone; showing \(resolved.uuidString, privacy: .public)")
         }

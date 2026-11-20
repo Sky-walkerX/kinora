@@ -11,6 +11,7 @@ struct MenuBarView: View {
     @Environment(EnergyMonitor.self) private var energy
     @Environment(SettingsModel.self) private var settings
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(settings.playback.paused ? "Resume Wallpapers" : "Pause Wallpapers") { KinoraCommands.togglePause() }
@@ -18,8 +19,10 @@ struct MenuBarView: View {
             .disabled(wallpaper.selection?.rules.rotation == nil)
         Divider()
         Text(costLine)
-        if let shown = wallpaper.currentItem.flatMap({ library.item($0) }) {
+        if let shown = wallpaper.shownItem(dark: colorScheme == .dark).flatMap({ library.item($0) }) {
             Text("Showing \(shown.name)")
+        } else if wallpaper.shown(dark: colorScheme == .dark)?.dependsOnUnlocks == true {
+            Text("Changes each time you unlock")
         }
         Menu("Use as Wallpaper") {
             ForEach(library.items.prefix(20)) { item in
