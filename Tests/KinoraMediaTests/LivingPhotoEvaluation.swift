@@ -56,7 +56,7 @@ import UniformTypeIdentifiers
         let wall = Date()
         let result = try await LivingPhotoGenerator.generate(photo: photo, output: Self.output, workFolder: work)
         let wallSeconds = Date().timeIntervalSince(wall)
-        let peakMB = sampler.stop()
+        let (peakMB, startMB) = sampler.stop()
         #expect(try Data(contentsOf: photo) == original, "the photo must only be read")
 
         // Frames to look at: the start, the furthest sideways, a close-up of the gap, and each layer.
@@ -87,7 +87,7 @@ import UniformTypeIdentifiers
             "subjects": result.detection.count, "coverage": result.detection.coverage, "lifted": result.detection.lifted,
             "detectionFailure": result.detection.failure ?? NSNull(),
             "prepareSeconds": result.prepareSeconds, "encodeSeconds": result.encodeSeconds, "wallSeconds": wallSeconds,
-            "peakFootprintMB": peakMB, "codec": result.codec, "megabytes": Double(result.bytes) / 1_000_000,
+            "peakFootprintMB": peakMB, "startFootprintMB": startMB, "codec": result.codec, "megabytes": Double(result.bytes) / 1_000_000,
             "seamLumaDiff": playback.seam, "meanStepLumaDiff": playback.meanStep, "maxStepLumaDiff": playback.maxStep,
             "decodeWallSeconds": playback.wallSeconds, "decodeCPUSeconds": playback.cpuSeconds, "videoSeconds": playback.videoSeconds,
             "liveCompositeMsPerFrame": live,
@@ -102,7 +102,7 @@ import UniformTypeIdentifiers
         func f(_ value: Double, _ digits: Int = 2) -> String { String(format: "%.\(digits)f", value) }
         return "\(name) \(Int(size.width))x\(Int(size.height)): subjects \(result.detection.count), coverage \(f(result.detection.coverage, 3)), "
             + "lifted \(result.detection.lifted), subject box \(subject), prepare \(f(result.prepareSeconds)) s, encode \(f(result.encodeSeconds)) s, "
-            + "wall \(f(wallSeconds)) s, peak footprint \(f(peakMB, 0)) MB, \(result.codec) \(f(Double(result.bytes) / 1_000_000, 1)) MB; "
+            + "wall \(f(wallSeconds)) s, footprint +\(f(peakMB - startMB, 0)) MB over \(f(startMB, 0)) MB, \(result.codec) \(f(Double(result.bytes) / 1_000_000, 1)) MB; "
             + "seam luma diff \(f(playback.seam)) vs steps mean \(f(playback.meanStep)) max \(f(playback.maxStep)); "
             + "decode \(f(playback.cpuSeconds)) CPU s for \(f(playback.videoSeconds, 0)) s of video "
             + "(\(f(playback.cpuSeconds / max(0.001, playback.videoSeconds) * 100, 1))% of a core); "
@@ -225,19 +225,21 @@ import UniformTypeIdentifiers
 final class FootprintSampler: @unchecked Sendable {
     private let lock = NSLock()
     private var peak: UInt64 = 0
+    private var start: UInt64?
     private let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
 
     init() {
+        sample()
         timer.schedule(deadline: .now(), repeating: .milliseconds(20))
         timer.setEventHandler { [weak self] in self?.sample() }
         timer.resume()
     }
 
-    /// Stops sampling and returns the peak in MB.
-    func stop() -> Double {
+    /// Stops sampling and returns the peak and the footprint when sampling began, in MB.
+    func stop() -> (peak: Double, start: Double) {
         timer.cancel()
         sample()
-        return lock.withLock { Double(peak) / 1_048_576 }
+        return lock.withLock { (Double(peak) / 1_048_576, Double(start ?? 0) / 1_048_576) }
     }
 
     private func sample() {
@@ -246,7 +248,10 @@ final class FootprintSampler: @unchecked Sendable {
             pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
         }
         guard status == 0 else { return }
-        lock.withLock { peak = max(peak, info.ri_phys_footprint) }
+        lock.withLock {
+            if start == nil { start = info.ri_phys_footprint }
+            peak = max(peak, info.ri_phys_footprint)
+        }
     }
 }
 

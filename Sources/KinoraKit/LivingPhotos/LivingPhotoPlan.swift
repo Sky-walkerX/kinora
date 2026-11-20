@@ -101,9 +101,11 @@ public struct LivingPhotoPlan: Equatable, Sendable {
 
     /// A photo may be at most this many times taller or wider, in shape, than the display.
     /// Anything beyond is never on screen, since the crop is display-shaped, but would still be
-    /// scaled, masked and filled: a 1240×3043 strip on a 2940×1912 display needed a
-    /// 3175×7795 canvas and about 4 GB.
-    public static let maxShapeSpread = 2.2
+    /// scaled, masked and filled, and memory grows with it: a 1240×3043 strip on a 2940×1912
+    /// display needed a 3175×7795 canvas and about 4 GB, and a 3:4 portrait a 3175×4233
+    /// canvas of which less than half is ever shown. At 1.5, portraits are cut to roughly square
+    /// around their subject, which still leaves framing room above and below the window.
+    public static let maxShapeSpread = 1.5
 
     /// True when the photo is so much taller or wider than the display that only part of it is used.
     public static func needsCutting(photo: CGSize, output: CGSize) -> Bool {

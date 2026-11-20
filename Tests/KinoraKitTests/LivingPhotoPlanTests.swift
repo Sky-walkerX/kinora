@@ -203,11 +203,22 @@ import Testing
 @Suite struct LivingPhotoRegionTests {
     let display = CGSize(width: 2940, height: 1912)
 
-    @Test func leavesOrdinaryPhotosWhole() {
-        for photo in [CGSize(width: 4032, height: 3024), CGSize(width: 3024, height: 4032), CGSize(width: 6000, height: 2000)] {
+    @Test func leavesLandscapePhotosWhole() {
+        for photo in [CGSize(width: 4032, height: 3024), CGSize(width: 3000, height: 2000), CGSize(width: 4000, height: 1800)] {
             #expect(!LivingPhotoPlan.needsCutting(photo: photo, output: display), "\(photo)")
             #expect(LivingPhotoPlan.workingRegion(photo: photo, output: display, subject: nil) == CGRect(origin: .zero, size: photo))
         }
+    }
+
+    @Test func cutsPortraitsButKeepsMoreThanTheWindowShows() {
+        let portrait = CGSize(width: 3024, height: 4032)
+        #expect(LivingPhotoPlan.needsCutting(photo: portrait, output: display))
+        let region = LivingPhotoPlan.workingRegion(photo: portrait, output: display, subject: nil)
+        #expect(region.width == portrait.width)
+        let plan = LivingPhotoPlan.make(photo: region.size, output: display, subject: nil)!
+        // Room to frame above and below the display-shaped window, but far less than the whole photo.
+        #expect(plan.canvas.height >= display.height * LivingPhotoPlan.overscan * 1.3)
+        #expect(plan.canvas.height < plan.canvas.width * portrait.height / portrait.width * 0.8)
     }
 
     @Test func cutsANarrowStripToABoundedShape() {
@@ -226,7 +237,7 @@ import Testing
     @Test func keepsTheSubjectAndItsHeadroom() {
         let tall = CGSize(width: 1000, height: 6000)
         // A person near the top of a tall photo (y up): the region keeps their top with room above.
-        let person = CGRect(x: 300, y: 4800, width: 400, height: 900)
+        let person = CGRect(x: 300, y: 4800, width: 400, height: 700)
         let region = LivingPhotoPlan.workingRegion(photo: tall, output: display, subject: person)
         #expect(region.minY <= person.minY && region.maxY >= person.maxY)
         #expect(region.maxY >= min(tall.height, person.maxY + region.height * LivingPhotoPlan.headroom) - 1)
