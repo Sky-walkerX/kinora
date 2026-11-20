@@ -5,6 +5,7 @@ import AVFoundation
 import Foundation
 import ImageIO
 import KinoraKit
+import KinoraMedia
 import KinoraRender
 import UniformTypeIdentifiers
 

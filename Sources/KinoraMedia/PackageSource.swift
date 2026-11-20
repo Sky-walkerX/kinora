@@ -160,7 +160,7 @@ public enum PackageSource: @unchecked Sendable {
     }
 
     static func size(_ url: URL) -> Int64? {
-        (try? url.resourceValues(forKeys: [.fileSizeKey])).flatMap(\.fileSize).map(Int64.init)
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map { Int64($0) }
     }
 
     /// Copies a plain file (following links to it) without reading more than `limit` bytes.
@@ -186,14 +186,14 @@ public enum PackageSource: @unchecked Sendable {
     }
 
     static func describe(_ error: Error) -> Error {
-        switch error {
-        case ZipArchive.Failure.notAZip: Failure.damaged("it isn't a zip archive")
-        case ZipArchive.Failure.tooManyEntries: PackageProblem.tooManyFiles
-        case ZipArchive.Failure.tooLarge: Failure.tooLarge
-        case ZipArchive.Failure.cancelled: CancellationError()
-        case ZipArchive.Failure.unsupported(let what): Failure.damaged("Kinora doesn't read \(what)")
-        case ZipArchive.Failure.damaged(let detail): Failure.damaged(detail)
-        default: error
+        guard let failure = error as? ZipArchive.Failure else { return error }
+        switch failure {
+        case .notAZip: return Failure.damaged("it isn't a zip archive")
+        case .tooManyEntries: return PackageProblem.tooManyFiles
+        case .tooLarge: return Failure.tooLarge
+        case .cancelled: return CancellationError()
+        case .unsupported(let what): return Failure.damaged("Kinora doesn't read \(what)")
+        case .damaged(let detail): return Failure.damaged(detail)
         }
     }
 }

@@ -63,7 +63,7 @@ public final class ZipArchive: @unchecked Sendable {
     public init(url: URL, maxEntries: Int = 4096) throws {
         guard let handle = try? FileHandle(forReadingFrom: url) else { throw Failure.notAZip }
         self.handle = handle
-        let end = (try? handle.seekToEnd()).map(Int64.init) ?? 0
+        let end = (try? handle.seekToEnd()).map { Int64($0) } ?? 0
         fileSize = end
         guard end >= 22 else { throw Failure.notAZip }
 

@@ -77,15 +77,16 @@ Kinora treats every package as untrusted. Before copying anything it checks:
 - **Paths.** Every file name is a plain name at the package's top level: no `/`, no `..`, no leading `~` or `.`. Subfolders, symbolic links and files marked executable are refused.
 - **Contents.** The package holds `wallpaper.json`, the files the manifest names, and optionally `LICENSE`, `LICENSE.txt`, `LICENSE.md`, `README.md`, `README.txt` or `CREDITS.txt`. Anything else is refused.
 - **Sizes.** Manifest at most 64 KB; video at most 1 GB; picture at most 100 MB; preview at most 10 MB; each document at most 256 KB; the whole package at most 1.1 GB.
-- **Archives.** A zip is measured with `zipinfo` before it is opened: at most 32 entries and 1.1 GB uncompressed, so a small zip cannot expand to fill the disk. It is opened with `ditto` into Kinora's own work folder, and anything that came out as a link is refused.
-- **Media.** A video must open in AVFoundation, have a video track, be at most 8192 pixels on its longest side and at most 10 minutes long. A picture must be at most 200 megapixels. Videos are converted once for your display, like any import; large pictures are stored once at your display's size.
+- **Archives.** Kinora reads zips itself; it never hands them to an unarchiving tool. It copies the zip into its own work folder (at most 1.1 GB), reads the archive's directory, and refuses the whole package if any entry is a link or special file, is encrypted, has an absolute path or `..`, or sits deeper than one folder. Archives may hold at most 64 entries and declare at most 1.1 GB. Only `wallpaper.json` and the media it names are ever unpacked, each under a name Kinora chooses, stopped at its declared size and the limits above, and checked against its CRC. Stored and deflated entries are read; zip64 and split archives are not. `__MACOSX` folders and `.DS_Store` files are ignored.
+- **Folders.** A package folder's manifest and media must be plain files inside it, after following any links; they are read with the same size limits.
+- **Media.** A video must open in AVFoundation, have a video track, be at most 8192 pixels on its longest side and at most 10 minutes long. Reference movies that point at other files are refused. A picture must really be JPEG, PNG or HEIC, whatever its name says, and at most 200 megapixels. Videos are converted once for your display, like any import; large pictures are stored once at your display's size.
 - **Text.** No control characters in names and credits.
 
 The installed copy lives in Kinora's library. The package you installed from is not changed.
 
 ## The gallery's extra rules
 
-The [gallery](../gallery/README.md) lists only packages whose license allows anyone to redistribute them, inside a wallpaper app: `CC0-1.0`, `CC-BY-4.0`, `CC-BY-SA-4.0`, `PDDL-1.0`, or `LicenseRef-Public-Domain` for public-domain works such as most NASA footage. CC BY and CC BY-SA packages must carry their credit line. The app checks this again when it installs a gallery download, and checks that the downloaded package's `id` and license match the gallery's listing and that its SHA-256 matches.
+The [gallery](../gallery/README.md) lists only packages whose license allows anyone to redistribute them, inside a wallpaper app: `CC0-1.0`, `CC-BY-4.0`, `CC-BY-SA-4.0`, `PDDL-1.0`, or `LicenseRef-Public-Domain` for public-domain works such as most NASA footage. CC BY and CC BY-SA packages must carry their credit line. The app checks this again when it installs a gallery download, and checks that the downloaded package's `id`, version and license match the gallery's listing and that its SHA-256 matches. A package installed from a file never replaces one installed from the gallery, even with the same `id`, or the other way round.
 
 ## Making a package
 

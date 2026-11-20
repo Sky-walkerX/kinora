@@ -5,6 +5,7 @@ import CryptoKit
 import Foundation
 import ImageIO
 import KinoraKit
+import KinoraMedia
 import Observation
 import SwiftUI
 
@@ -111,8 +112,8 @@ import SwiftUI
     /// GitHub only, no cookies or cache, at most 10 MB, decoded no larger than shown.
     func preview(_ url: URL) async -> CGImage? {
         if let cached = previews[url] { return cached }
-        guard let (data, response) = try? await Self.fetch(url, limit: PackageLimits.previewBytes), response.statusCode == 200,
-              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+        guard let fetched = try? await Self.fetch(url, limit: PackageLimits.previewBytes), fetched.1.statusCode == 200,
+              let source = CGImageSourceCreateWithData(fetched.0 as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               let type = CGImageSourceGetType(source) as String?, LibraryModel.packageImageTypes.contains(type),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
