@@ -60,7 +60,9 @@ enum ForeignImporter {
         case .failure(let reason): throw Failure.unsupported(wallpaper.title, reason)
         }
         // The file must be a plain file inside the wallpaper, after following any links.
-        let limit = wallpaper.kind == .picture ? PackageLimits.imageBytes : PackageLimits.videoBytes
+        let isPicture: Bool
+        if case .picture = wallpaper.kind { isPicture = true } else { isPicture = false }
+        let limit = isPicture ? PackageLimits.imageBytes : PackageLimits.videoBytes
         let media: URL
         do {
             media = try await PackageInstaller.background { try folder.file(file, work: work, limit: limit) }

@@ -1,110 +1,92 @@
 # Continue Kinora
 
-Updated: 2026-11-13, after a cloud session on branch `claude/gifted-darwin-0w9cpx`. Early development; no release yet.
+Updated: 2026-11-20, after a scheduled cloud session on branch `claude/gifted-darwin-cyae1h`. Early development; no release yet.
 
-## Audit at the start of this session
+## Where the work is
 
-What the code held on `main` (4cdcf0c), checked against the design's milestones:
+**`main` is behind.** It stops at the 2026-11-13 handoff (4cdcf0c). Everything since, milestones 3 to 7 and this session's fixes, is on `claude/gifted-darwin-cyae1h`, which contains the earlier session's branch `claude/gifted-darwin-0w9cpx` unchanged plus the commits below. Nothing has been merged or released. A scheduled run that starts from `main` must check out this branch first, or it will redo finished work. Merging it into `main` (after the owner's review) avoids that.
 
-| Milestone | State found | Gaps found |
-|---|---|---|
-| 1 Foundation | Done | **CI on `main` was red**: Swift 6.3.3 timed out type-checking one expression in `ContentView`. The handoff's "71 tests pass" was from the owner's Mac (Swift 6.4.2). |
-| 2 Vertical slice | Done | Initial activation restarts WallpaperAgent (known). Per-display untested. |
-| 3 Library rules | Partial | Rotation only through *all* items (no playlists); schedule in the model and plug-in but no UI; Lock Screen/Dark pickers only while following Kinora's selection; the UI showed `rules.wallpaper`, not what rotation/schedule actually showed; removing an item used by Lock Screen, Dark, rotation or schedule left dangling IDs, and a System Settings tile naming a removed item drew a blank grey surface; no folders, images or GIFs; no Apple aerials. |
-| Living Photos | Prototype only | Not in any target. |
-| 4–7 | Not started | No shaders, format, gallery, Lively/WE parsing, onboarding, menu bar, intents, uninstall, diagnostics, updates or packaging. |
+## Audit at the start of this session (2026-11-20)
 
-## What this session did
+The stored task described `main`'s state. The previous session's branch already held most of milestones 3 to 7, built and tested on CI but never run on a Mac, so this session audited that code rather than rebuilding it. CI on the inherited branch was green (macOS 26 runner).
 
-All on `claude/gifted-darwin-0w9cpx`, one commit per increment, each built and tested on GitHub's macOS 26 runner.
+| Milestone | State found | Gaps found and fixed this session | Still open |
+|---|---|---|---|
+| 3 Library rules | Playlists, Lock Screen and Dark Mode variants, time-of-day editor, rotation, safe removal, Apple aerials, folders, pictures, GIFs | Per-unlock rotation counted one unlock per **display** (two displays skipped every other item; a two-item rotation never changed) and restarted on every plug-in restart. The app's "current" marks showed the rules' main wallpaper, not what rotation/schedule/Dark Mode/fallback actually drew. No hint that rotation or schedule overrides Dark Mode. No way into variants for a wallpaper picked in System Settings. Removing the only library item was refused even though an original could take over. | Per-display and per-Space choices. On-device checks. |
+| Living Photos | Integrated: preview, three motion strengths, progress, cancel, cleanup, original untouched; tested only on one synthetic image | Evaluated on ten real public-domain photos on CI (see Validation). | Quality and power on a real Mac; re-render at another display size (the source photo isn't kept). |
+| 4 Originals | Live Sky, Aurora, Tide, Lava Lamp; previews, snapshots, power rules, System Settings group | Read through the plug-in path; no bugs found. | That `CAMetalLayer` content reaches WallpaperAgent through the remote context; real GPU cost. |
+| 5 Format and gallery | FORMAT.md v1, validation, installer, gallery client, staged `gallery/` repo | A security review found the installer measured zips with `zipinfo` (which reads its argument as a pattern) and extracted them whole with `ditto` before checking anything; manifest reads unbounded and through links; gallery previews via `AsyncImage` ignoring the gallery's network rules; Cancel misreported; a local package could silently replace a gallery item. All fixed (see below). | First reviewed footage; publishing `kinora-gallery` needs the owner's approval. |
+| 6 Lively / Wallpaper Engine | Video, GIF, picture import; clear refusals; WebM/web evaluation doc | The same zip and path fixes apply to Lively/WE zips. Added a CI probe of which containers macOS opens. | WebKit-in-plug-in spike (needs a Mac). |
+| 7 Polish | Menu bar, onboarding, Shortcuts intents and `kinora://` links, settings, update check, diagnostics, uninstall, release scripts, INSTALL/BENCHMARKS | — | Shortcuts actions don't appear (no `Metadata.appintents`); uninstall restores the original store only when Kinora is the wallpaper on every display; on-device checks. |
 
-1. **CI fixed** and enabled for `claude/**` pushes and manual runs.
-2. **Milestone 3.** Named playlists (timer or per unlock, optional shuffle that every process agrees on, Next); a time-of-day editor with a day-and-night preset; removal that says where an item is used and rewrites the rules first, refusing to remove the only thing showing; a plug-in fallback chain so a surface never goes blank; Apple aerials played in place from `~/Library/Application Support/com.apple.wallpaper/aerials/` (macOS 26) or the older `idleassetsd` folder, with read-only sandbox exceptions and never deleted; folder, picture and animated-GIF import; Pause All and Reduce Motion in the shared rules; a sidebar.
-3. **Living Photos integrated.** Pure maths in `KinoraKit/LivingPhotos` (canvas, framing, motion, loop, fill sizes, texture transfer); `KinoraMedia` prepares layers with Vision + Core Image and encodes HEVC (H.264 fallback) with progress, cancellation and partial-output cleanup; a Living Photos section with a live preview, three motion strengths, and clear subject messages. Photos without a usable subject drift as one layer. The photo is only read. Refinement over the spike: subjects shorter than 84% of the crop are centred; taller ones keep the spike's top-aligned framing. The filled gap now grows with the motion so the subject's own pixels never show (tested).
-4. **Milestone 4, Kinora Originals.** Live Sky (real sun from the time-zone table, NOAA equations, no Location Services), Aurora, Tide, Lava Lamp. `KinoraRender` compiles Metal source at run time. The plug-in's surface now holds video, still or shader content in one remote context with cross-fades. Originals draw only while playing, at their own rate capped by settings and battery, at 25–50% resolution, skipping frames rather than blocking. They appear in System Settings as their own group, and everywhere items do.
-5. **Milestone 5.** [`docs/FORMAT.md`](FORMAT.md) (format v1: media and settings only, no code); strict validation of untrusted packages and zips; installer with in-place replacement; gallery client (explicit Browse, GitHub hosts only, no cookies/cache, streamed downloads with progress/cancel, size cap, SHA-256, listing must match); [`examples/aurora-rose`](../examples/aurora-rose); the separate gallery repository staged in [`gallery/`](../gallery/README.md) with an empty catalog.
-6. **Milestone 6.** Lively (`LivelyInfo.json`, schema from Lively's GPL source) and Wallpaper Engine (`project.json`) folders and zips: videos, GIFs and pictures import; web, scenes, programs, streams and WebM get plain explanations. [WebM and WebKit evaluation](spikes/2026-11-13-webm-and-web-wallpapers.md) with the exact spike to run.
-7. **Milestone 7.** Menu bar extra; three-step onboarding; Shortcuts actions and `kinora://` links on one shared state; Settings in tabs; manual (optionally weekly) update check that only links to releases; diagnostics export with no names or paths; Remove Kinora; `Tools/package-release.sh`, `Tools/uninstall.sh`, `Tools/measure-plugin.sh`; [INSTALL](INSTALL.md) (trust tradeoffs) and [BENCHMARKS](BENCHMARKS.md).
+## What this session changed
+
+1. **Unlocks and what is shown** (`SurfaceResolution.swift`). `UnlockCounter` counts once per lock however many surfaces report it, belongs to one rotation, and is kept in the plug-in's sandboxed preferences. `SurfaceResolution` is now the single place that decides what a surface draws, including the fallbacks for removed items; the plug-in draws with it and the app's grid, inspector, originals page and menu bar describe the screen with it, refreshing at schedule and rotation boundaries. Unlock rotations show "Changes each time you unlock", since only the plug-in can count unlocks. The inspector shows the Lock Screen's own wallpaper, explains when Dark Mode is overridden, and offers "Manage in Kinora" for a wallpaper picked in System Settings.
+2. **Untrusted archives** (`ZipArchive.swift`, `PackageSource.swift`, in KinoraMedia so they are unit-tested). Kinora reads zips itself: the archive is copied into the work folder under a byte cap, its directory is checked first (no links or special files, encryption, zip64, absolute paths, `..`, or nesting past the format's depth; at most 64 entries for packages), and only the manifest and the one media file it names are inflated, under names Kinora picks, capped at the declared size and the format's limits, and CRC-checked. Folders: manifest and media must be plain files inside the package after resolving links, read with bounded reads. Videos open with reference movies forbidden; pictures must really be JPEG/PNG/HEIC. `zipinfo` and `ditto` are no longer used.
+3. **Gallery and updates.** Previews load through the gallery session's rules (GitHub only, no cookies or cache, 10 MB, decoded small); the gallery text says previews load while browsing. Cancel during download no longer shows a network error; once the download finishes, Cancel becomes "Installing…". Items record their origin (`file` or `gallery:<sha256>`), so a file never replaces a gallery item or the reverse, and the gallery checks version as well as id and license. Update checks follow GitHub API redirects. Links with user names are refused in manifests and the catalog; catalog text with control characters is skipped.
+4. **Validation tools.** `.github/workflows/living-photo-eval.yml` makes Living Photos from ten NASA photos listed with SHA-256 in `Tests/Fixtures/living-photos.tsv` and uploads frames and measurements as an artifact. `ContainerProbeTests` records which containers and codecs macOS opens, from tiny synthetic clips in `Tests/Fixtures/containers/`.
 
 ## Validation
 
-**Observed** on GitHub's `macos-26` runner (virtual Apple-silicon Mac, Swift 6.3.3, SDK 26.5), every increment:
+**Observed on GitHub's `macos-26` runner** (virtual Apple-silicon Mac, Swift 6.3.3). Not a real Mac: no WallpaperAgent, no Lock Screen, paravirtual GPU and encoder.
 
-- `./build.sh test`: all of about 160 tests pass across KinoraKit and KinoraMedia, with the two benchmarks run separately in a release build (the KinoraKit subset, 137 tests, also passes on Linux with Swift 6.3.3).
-- `./build.sh` (universal release build and bundle assembly, ad hoc signed): succeeds.
-- Living Photo pipeline end to end: synthetic photo, Vision found and lifted the subject, 30-frame loop of exact duration and size, last frame leads back to the first, cancellation removes partial output, non-photos refused, original untouched. Full-size release benchmark: 17.8–25.8 s for a 12 s 2940×1912 loop, 10.6 MB, 469–598 MB peak memory.
-- All four shaders compile and draw non-flat, moving, deterministic images; Live Sky darkens at night. GPU per frame on the virtual GPU: 0.9–11.6 ms, noisy between runners, Aurora the costliest ([details](BENCHMARKS.md)).
-- GIF conversion keeps frame timing; still GIFs are recognised.
+- `./build.sh test` and `./build.sh` (universal release bundle): see the latest CI run on this branch. RESULT_PLACEHOLDER
+- Living Photo evaluation on ten real photos: EVAL_PLACEHOLDER
+- Container probe: PROBE_PLACEHOLDER
 
-**Not observed; assumptions until checked on a Mac:**
-
-- Anything on screen: the app's new UI, the plug-in showing originals, stills, aerials and Living Photos on the desktop and Lock Screen, cross-fades, System Settings' Originals group, menu bar, onboarding.
-- That `CAMetalLayer` content reaches WallpaperAgent through the remote `CAContext`, and that Metal works in the sandboxed plug-in.
-- That the sandbox exceptions let the plug-in read the aerial folders and `/usr/share/zoneinfo`.
-- That System Settings accepts the second tile group.
-- Real-Mac CPU, GPU, energy and memory for any new path; Living Photo quality on real photos.
-- Login item, update check against a real release, uninstall leaving no System Settings section, quarantined-download install.
-
-**Observed limitation: Shortcuts actions.** The release build runs Apple's App Intents metadata extractor only for the library modules ("Extracted no relevant App Intents symbols") and produces no `Metadata.appintents` for the app, so the four actions in `Intents.swift` will not appear in Shortcuts yet. The `kinora://` links (Shortcuts' "Open URLs") don't depend on it, though they are untested on a Mac too. Fixing it needs either an Xcode project for the app target or running `appintentsmetadataprocessor` by hand in `build.sh` with the compiler's const-values output.
+**Not observed; assumptions until checked on a Mac:** everything on screen (app UI, plug-in drawing videos, stills, aerials, originals and Living Photos on the desktop and Lock Screen, cross-fades, System Settings' tiles); that the unlock counter sees one unlock per lock on a real multi-display Mac; that `CAMetalLayer` content reaches WallpaperAgent; sandbox access to the aerial folders; real CPU, GPU, energy and memory for every path; login item, update check against a real release, uninstall, quarantined installs.
 
 ## Owner checklists
 
 Run on the Mac, then **restore your original wallpaper** (Settings › Advanced › Restore Original Wallpaper) at the end.
 
-Build: `./build.sh test && ./build.sh install`, open `~/Applications/Kinora.app`.
+Build: `git checkout claude/gifted-darwin-cyae1h && ./build.sh test && ./build.sh install`, open `~/Applications/Kinora.app`.
 
 **Library rules**
-- [ ] Make a playlist of 3 items, play it every 15 minutes with shuffle; Next changes the desktop without a blink.
-- [ ] Set a Lock Screen wallpaper different from the desktop; lock and unlock.
-- [ ] Time of Day: Day and Night, then edit a time to 2 minutes from now; the desktop changes then.
-- [ ] Remove an item used as the Lock Screen and in the playlist: the dialog lists both; afterwards both use another item. Try removing the only shown item: refused with a message.
+- [ ] Make a playlist of 3 items, play it every 15 minutes with shuffle; Next changes the desktop without a blink, and the grid's checkmark moves with it.
+- [ ] Play a playlist "Each Time You Unlock": lock and unlock three times; the desktop steps once per unlock (with an external display too, if you have one). Quit and relaunch Kinora, log out and in: it continues rather than starting over.
+- [ ] Set a Lock Screen wallpaper different from the desktop; lock and unlock. The inspector's Status lists it.
+- [ ] Set Dark Mode while a rotation runs: the inspector says the rotation decides. Stop the rotation; switching appearance changes the desktop.
+- [ ] Time of Day: Day and Night, then edit a time to 2 minutes from now; the desktop and the grid's checkmark change then.
+- [ ] Pick a Kinora tile in System Settings, then open Kinora: "Manage in Kinora" appears, and after it the variants do.
+- [ ] Remove an item used as the Lock Screen and in a playlist: the dialog lists both; afterwards both use another item. Remove every library item while Kinora shows one: an original takes over.
 - [ ] Apple Aerials: download one in System Settings, add it, use it. Remove it from Kinora: the aerial stays in System Settings.
-- [ ] Drop a folder with videos and pictures, a still JPEG, an animated GIF.
 
-**Living Photos** (use your own photos: a portrait, two or more people, a landscape, a pet with fur or hair edges)
-- [ ] Preview appears in a second or two; motion strengths differ; subject message is right.
+**Living Photos** (your own photos: a portrait, a group, a landscape, a pet)
+- [ ] Preview appears in a second or two; motion strengths differ; the subject message is right.
 - [ ] Make one; progress moves; Stop cancels and leaves nothing in `~/Library/Application Support/Kinora/Work`.
 - [ ] On the desktop and Lock Screen: no ghost of the subject in the gap, no visible loop point, no edges at full motion.
-- [ ] `Tools/measure-plugin.sh 120 living-photo` while it plays (desktop clear, "Always moving"); compare with an ordinary video.
+- [ ] `Tools/measure-plugin.sh 120 living-photo` (desktop clear, "Always moving"); compare with an ordinary video of the same size.
 
 **Originals**
-- [ ] Each original shows and moves on the desktop and Lock Screen; System Settings › Wallpaper has a "Kinora Originals" group.
-- [ ] Live Sky matches the time of day where you are.
-- [ ] Pause All, Reduce Motion and Low Power Mode hold the frame; "Rests while you work" settles after 5 s.
+- [ ] Each shows and moves on the desktop and Lock Screen; System Settings › Wallpaper has a "Kinora Originals" group.
+- [ ] Live Sky matches the time of day; Pause All, Reduce Motion and Low Power Mode hold the frame; "Rests while you work" settles after 5 s.
 - [ ] `Tools/measure-plugin.sh 120 aurora` (and `sudo` once for energy).
 
 **Packages, gallery, imports**
-- [ ] Zip `examples/aurora-rose`, rename to `.kinorawallpaper`, double-click: installs as a tinted Aurora.
+- [ ] Zip `examples/aurora-rose`, rename to `.kinorawallpaper`, double-click: installs as a tinted Aurora. Zip it inside a folder too: same result.
 - [ ] Gallery › Browse: says the gallery isn't open yet (the repository doesn't exist).
-- [ ] A Lively video wallpaper folder and a Wallpaper Engine video folder import; a WE scene and a Lively web wallpaper explain why not.
+- [ ] A Lively video wallpaper folder and zip, and a Wallpaper Engine video folder, import; a WE scene and a Lively web wallpaper explain why not.
 
-**App**
-- [ ] Onboarding on first launch (`defaults delete io.github.sky-walkerx.kinora onboarded` to see it again).
-- [ ] Menu bar: pause/resume, switch, playlist.
-- [ ] `open kinora://pause`, `open kinora://resume` and `open kinora://next` work. (Shortcuts actions won't show yet; see above.)
-- [ ] Open at login; Save Diagnostics produces a readable file with no names.
-- [ ] Remove Kinora (without deleting the library): original wallpaper back, no Kinora section in System Settings after relaunching it. Reinstall with `./build.sh install` afterwards.
+**App, sleep and displays**
+- [ ] Onboarding (`defaults delete io.github.sky-walkerx.kinora onboarded`), menu bar, `open kinora://pause|resume|next`, Open at Login, Save Diagnostics (no names in it).
+- [ ] Sleep and wake with a video, an original and a Living Photo: no black frames.
+- [ ] Remove Kinora (keep the library): original wallpaper back, no Kinora section in System Settings after relaunching it. Reinstall with `./build.sh install`.
 
-**Sleep, wake, displays**
-- [ ] Sleep and wake with a video, an original and a Living Photo; no black frames.
-- [ ] If an external display is available: both displays show and pause independently.
+**Before any release** (not authorized): `Tools/package-release.sh`, move the zip through a download so it is quarantined, Open Anyway, check the plug-in launches and the Lock Screen plays.
 
-**Before any release** (not authorized yet)
-- [ ] `Tools/package-release.sh`, copy the zip to another account or Mac via a download so it is quarantined, Open Anyway, and check the plug-in launches and the Lock Screen plays.
+## Remaining work, in order
 
-## Remaining work
-
-- **Verify everything above on the Mac** and fix what fails. This session could not see the screen.
-- Apply a selection without restarting WallpaperAgent (open since the spike).
-- Per-display and per-Space choices (design §7.3).
-- Run the WebKit-in-plug-in spike; decide on web wallpapers. Check `AVURLAsset` on WebM; build the Matroska/VP9 reader only if needed.
-- Living Photos: test the real photo set; consider keeping a downscaled copy of the source to re-render at another size; reduce generation's peak memory (469 MB on CI).
-- Gallery: choose and review the first footage with redistribution rights; publish `Sky-walkerX/kinora-gallery` **with the owner's approval**; until then the catalog stays empty.
-- Sparkle 2 updates need an EdDSA key; decide with the owner. Today's checker only links to releases.
-- Developer ID and notarization: decide with the owner ([options](INSTALL.md)); nothing bought, no signing material uploaded.
-- Publish a release and the Homebrew tap only when the owner says go.
-- Make the Shortcuts actions appear (App Intents metadata for the app target, see Validation).
-- Localisation (String Catalogs), Reduce Transparency audit, VoiceOver pass on the new views.
+1. **Merge this branch** into `main` once the owner has looked at it, so scheduled runs start from it.
+2. **On-device verification** with the checklists above; fix what fails.
+3. Apply a selection without restarting WallpaperAgent (open since the spike; initial activation still restarts it once).
+4. Per-display and per-Space choices (design §7.3). Uninstall should then also clear Kinora from displays, Spaces and the screen saver where it is still named, not only restore the original when Kinora is everywhere.
+5. WebKit-in-plug-in spike (`docs/spikes/2026-11-13-webm-and-web-wallpapers.md`); decide on web wallpapers. WebM: see the probe result above before building a Matroska reader.
+6. Living Photos: keep a downscaled source to re-render for a new display; lower generation's peak memory; compare with a real-time renderer only if real-Mac playback measurements justify it.
+7. Gallery: choose and review the first footage; publish `Sky-walkerX/kinora-gallery` **only with the owner's approval**.
+8. Shortcuts actions: produce `Metadata.appintents` (Xcode project for the app target, or `appintentsmetadataprocessor` with const-values output in `build.sh`). `kinora://` links work meanwhile.
+9. Sparkle 2 needs an EdDSA key, and Developer ID/notarization needs a paid account: decide with the owner ([options](INSTALL.md)). Nothing bought, no signing material uploaded.
+10. Localisation (String Catalogs), Reduce Transparency audit, VoiceOver pass.
 
 ## Development and verification
 
@@ -115,27 +97,22 @@ Build: `./build.sh test && ./build.sh install`, open `~/Applications/Kinora.app`
 Tools/package-release.sh   # release candidate in dist/, not published
 ```
 
-Builds need macOS and Swift 6.2+. In a Linux cloud session, push to a `claude/**` branch: CI builds and tests on macOS 26 and prints the benchmarks. The KinoraKit tests also run on Linux with a Swift toolchain if `import CoreGraphics` is mapped to Foundation and `DesktopCoverage` is left out; CI is the authority.
+Builds need macOS and Swift 6.2+. A Linux cloud session has no Swift toolchain: push to a `claude/**` branch and read GitHub's macOS CI. The "Living Photo evaluation" workflow runs on pushes that touch Living Photo code, or by hand; its artifact holds the frames. CI is never evidence of on-screen, Lock Screen, power or multi-display behaviour.
 
-The development Mac is Apple silicon on macOS 27.0.1. macOS 26, Intel, external displays, per-Space behaviour, reboot/pre-login behaviour and quarantined installs remain unverified; CI establishes none of them.
-
-Keep native Swift/SwiftUI, GPL-3.0-or-later, no accounts, telemetry, paywalls or unsolicited networking. Private macOS interfaces need runtime checks and safe failures. Initial activation still restarts WallpaperAgent once; later choices following Kinora update live.
-
-The owner authorized creating and pushing this repository and pushing development progress. That does not authorize a release, a gallery or tap repository, purchases, or uploading signing keys.
+Keep native Swift/SwiftUI, GPL-3.0-or-later, no accounts, telemetry, paywalls or unsolicited networking. Private macOS interfaces need runtime checks and safe failures. The owner authorized pushing development progress to this repository; that does not authorize a release, a gallery or tap repository, purchases, or uploading signing keys.
 
 ## Copyable continuation prompt
 
 ```text
-Continue work on Sky-walkerX/kinora. Read README.md and docs/HANDOFF.md first;
-the handoff lists what was built on branch claude/gifted-darwin-0w9cpx, what CI
-observed, what is still an assumption, and the owner's on-device checklists.
-
-Start from the checklist results the owner reports. Fix what fails on the Mac,
-then continue with "Remaining work" in order. Keep GPL-3.0-or-later, native
-Swift, local processing, no telemetry and no unsolicited network access. Add
-tests for new logic and run ./build.sh test and ./build.sh on macOS (GitHub's
-macOS CI from a Linux session). Record observed results separately from
-assumptions in the handoff. Do not publish releases, create the gallery or tap
-repositories, purchase anything or upload signing material without the
-owner's explicit approval.
+Continue work on Sky-walkerX/kinora. Check out claude/gifted-darwin-cyae1h
+(or main, if it has been merged) and read README.md and docs/HANDOFF.md:
+it lists what is built, what CI observed, what is still an assumption, and
+the owner's on-device checklists. Start from any checklist results the
+owner reports, fix what fails, then continue "Remaining work" in order.
+Keep GPL-3.0-or-later, native Swift, local processing, no telemetry and no
+unsolicited network access. Add tests for new logic; run ./build.sh test
+and ./build.sh on macOS (GitHub's macOS CI from Linux). Record observed
+results separately from assumptions. Do not publish releases, create the
+gallery or tap repositories, purchase anything or upload signing material
+without the owner's explicit approval.
 ```
