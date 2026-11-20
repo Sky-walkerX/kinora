@@ -199,3 +199,48 @@ import Testing
         #expect(TextureTransfer.gapColumns([Bool](repeating: false, count: 4), width: 2, height: 2) == nil)
     }
 }
+
+@Suite struct LivingPhotoRegionTests {
+    let display = CGSize(width: 2940, height: 1912)
+
+    @Test func leavesOrdinaryPhotosWhole() {
+        for photo in [CGSize(width: 4032, height: 3024), CGSize(width: 3024, height: 4032), CGSize(width: 6000, height: 2000)] {
+            #expect(!LivingPhotoPlan.needsCutting(photo: photo, output: display), "\(photo)")
+            #expect(LivingPhotoPlan.workingRegion(photo: photo, output: display, subject: nil) == CGRect(origin: .zero, size: photo))
+        }
+    }
+
+    @Test func cutsANarrowStripToABoundedShape() {
+        let strip = CGSize(width: 1240, height: 3043)
+        #expect(LivingPhotoPlan.needsCutting(photo: strip, output: display))
+        let region = LivingPhotoPlan.workingRegion(photo: strip, output: display, subject: nil)
+        #expect(region.width == 1240)
+        #expect(abs(region.width / region.height - (display.width / display.height) / LivingPhotoPlan.maxShapeSpread) < 0.01)
+        // Without a subject, the middle.
+        #expect(abs(region.midY - strip.height / 2) < 1)
+        // The canvas that results stays near the display's size instead of reaching 3175×7795.
+        let plan = LivingPhotoPlan.make(photo: region.size, output: display, subject: nil)!
+        #expect(plan.canvas.height <= display.height * LivingPhotoPlan.overscan * LivingPhotoPlan.maxShapeSpread + 2)
+    }
+
+    @Test func keepsTheSubjectAndItsHeadroom() {
+        let tall = CGSize(width: 1000, height: 6000)
+        // A person near the top of a tall photo (y up): the region keeps their top with room above.
+        let person = CGRect(x: 300, y: 4800, width: 400, height: 900)
+        let region = LivingPhotoPlan.workingRegion(photo: tall, output: display, subject: person)
+        #expect(region.minY <= person.minY && region.maxY >= person.maxY)
+        #expect(region.maxY >= min(tall.height, person.maxY + region.height * LivingPhotoPlan.headroom) - 1)
+        // A subject at the very bottom is kept, and the region stays inside the photo.
+        let low = LivingPhotoPlan.workingRegion(photo: tall, output: display, subject: CGRect(x: 0, y: 0, width: 500, height: 300))
+        #expect(low.minY == 0 && low.maxY <= tall.height)
+    }
+
+    @Test func cutsAPanoramaAroundItsSubject() {
+        let panorama = CGSize(width: 12000, height: 1500)
+        let subject = CGRect(x: 9000, y: 200, width: 600, height: 900)
+        let region = LivingPhotoPlan.workingRegion(photo: panorama, output: display, subject: subject)
+        #expect(region.height == 1500)
+        #expect(region.minX <= subject.minX && region.maxX >= subject.maxX)
+        #expect(region.maxX <= panorama.width)
+    }
+}

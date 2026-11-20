@@ -95,25 +95,38 @@ public final class LivingPhotoRenderer: @unchecked Sendable {
         self.context = context
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               CGImageSourceGetCount(source) > 0,
-              let size = Self.orientedSize(source) else { throw LivingPhotoError.unreadablePhoto }
-        guard Int(size.width) * Int(size.height) <= Self.maxPhotoPixels else {
-            throw LivingPhotoError.photoTooLarge(width: Int(size.width), height: Int(size.height))
+              let fullSize = Self.orientedSize(source) else { throw LivingPhotoError.unreadablePhoto }
+        guard Int(fullSize.width) * Int(fullSize.height) <= Self.maxPhotoPixels else {
+            throw LivingPhotoError.photoTooLarge(width: Int(fullSize.width), height: Int(fullSize.height))
         }
+        // A photo much taller or wider than the display is cut first, around its subject, found
+        // on a small copy: what is cut off could never be on screen.
+        var region = CGRect(origin: .zero, size: fullSize)
+        if LivingPhotoPlan.needsCutting(photo: fullSize, output: output) {
+            region = LivingPhotoPlan.workingRegion(photo: fullSize, output: output,
+                                                   subject: Self.subjectHint(source, photo: fullSize, context: context))
+        }
+        let size = region.size
         guard var plan = LivingPhotoPlan.make(photo: size, output: output, subject: nil, motion: motion,
                                               seconds: seconds, framesPerSecond: framesPerSecond) else { throw LivingPhotoError.unreadablePhoto }
         try flag.check()
 
-        // 1. The photo, decoded no larger than the canvas needs, then scaled to cover it exactly.
+        // 1. The photo, decoded no larger than the canvas needs, cut to the region, then scaled to cover it exactly.
         let canvasRect = CGRect(origin: .zero, size: plan.canvas)
-        let decodeSide = Int(max(plan.canvas.width, plan.canvas.height).rounded(.up))
+        let decodeSide = Int((max(fullSize.width, fullSize.height) * min(1, plan.photoScale)).rounded(.up))
         guard let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: decodeSide,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, decodeSide),
             kCGImageSourceShouldCacheImmediately: true,
         ] as CFDictionary) else { throw LivingPhotoError.unreadablePhoto }
-        let scaled = CIImage(cgImage: decoded)
-            .transformed(by: CGAffineTransform(scaleX: plan.canvas.width / Double(decoded.width), y: plan.canvas.height / Double(decoded.height)))
+        // The region is in photo pixels with y up; the decoded bitmap is smaller and runs top down.
+        let k = Double(decoded.width) / fullSize.width
+        let cut = CGRect(x: region.minX * k, y: (fullSize.height - region.maxY) * k, width: region.width * k, height: region.height * k)
+            .integral.intersection(CGRect(x: 0, y: 0, width: decoded.width, height: decoded.height))
+        guard let piece = region.size == fullSize ? decoded : decoded.cropping(to: cut) else { throw LivingPhotoError.unreadablePhoto }
+        let scaled = CIImage(cgImage: piece)
+            .transformed(by: CGAffineTransform(scaleX: plan.canvas.width / Double(piece.width), y: plan.canvas.height / Double(piece.height)))
         // Materialized once, so every later step reads pixels instead of re-running the decode.
         guard let canvasImage = context.createCGImage(scaled, from: canvasRect, format: .RGBA8, colorSpace: Self.sRGB) else {
             throw LivingPhotoError.cannotRender
@@ -215,6 +228,21 @@ public final class LivingPhotoRenderer: @unchecked Sendable {
               width > 0, height > 0 else { return nil }
         let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
         return (5...8).contains(orientation) ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+    }
+
+    /// Where the subject is, roughly, in photo pixels with y up, from a copy at most 1024 pixels
+    /// across. Only used to choose which part of a very tall or wide photo to keep.
+    static func subjectHint(_ source: CGImageSource, photo: CGSize, context: CIContext) -> CGRect? {
+        guard let small = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1024,
+        ] as CFDictionary),
+            let found = try? detectSubjects(in: small) else { return nil }
+        let extent = CGRect(x: 0, y: 0, width: small.width, height: small.height)
+        let (bounds, coverage) = measure(mask: found.mask, canvas: extent, context: context)
+        guard let bounds, LivingPhotoPlan.isUsableSubject(coverage: coverage) else { return nil }
+        let k = photo.width / Double(small.width)
+        return CGRect(x: bounds.minX * k, y: bounds.minY * k, width: bounds.width * k, height: bounds.height * k)
     }
 
     /// Vision's foreground instances: every subject in one mask, canvas-sized. Nil when there are none.

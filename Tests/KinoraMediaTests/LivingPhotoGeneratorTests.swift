@@ -137,6 +137,20 @@ func temporaryFolder() throws -> URL {
         #expect(renderer.image(at: 0.5) != nil)
     }
 
+    @Test func aNarrowStripIsCutToWhatTheDisplayCanShow() throws {
+        let folder = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // 300×1800: six times taller than wide, on a 16:10 display.
+        let strip = try SyntheticPhoto.figure(width: 300, height: 1800, in: folder, name: "strip.png")
+        let output = CGSize(width: 640, height: 400)
+        let renderer = try LivingPhotoRenderer(photo: strip, output: output)
+        // Without the cut the canvas would be 692 × 4152 pixels.
+        #expect(renderer.plan.canvas.height <= output.height * LivingPhotoPlan.overscan * LivingPhotoPlan.maxShapeSpread + 2)
+        #expect(renderer.plan.canvas.width >= output.width * LivingPhotoPlan.overscan - 1)
+        let frame = try #require(renderer.image(at: 0.25))
+        #expect(frame.width == 640 && frame.height == 400)
+    }
+
     /// The cost on the machine running the tests, at a real display size. Set KINORA_BENCH=1.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["KINORA_BENCH"] == "1"))
     func benchmarkAFullSizeLoop() async throws {

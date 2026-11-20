@@ -51,12 +51,12 @@ import UniformTypeIdentifiers
         defer { try? FileManager.default.removeItem(at: work) }
         let original = try Data(contentsOf: photo)
 
-        // Generation, as the app runs it.
-        _ = Memory.intervalPeakMB()
+        // Generation, as the app runs it, with this process's memory sampled throughout.
+        let sampler = FootprintSampler()
         let wall = Date()
         let result = try await LivingPhotoGenerator.generate(photo: photo, output: Self.output, workFolder: work)
         let wallSeconds = Date().timeIntervalSince(wall)
-        let peakMB = Memory.intervalPeakMB()
+        let peakMB = sampler.stop()
         #expect(try Data(contentsOf: photo) == original, "the photo must only be read")
 
         // Frames to look at: the start, the furthest sideways, a close-up of the gap, and each layer.
@@ -220,17 +220,38 @@ import UniformTypeIdentifiers
     }
 }
 
-/// This process's memory and CPU time.
-enum Memory {
-    /// The largest physical footprint since the last call, in MB.
-    static func intervalPeakMB() -> Double {
+/// The largest physical footprint this process reaches while it runs, sampled every 20 ms.
+/// (The kernel's own "interval" maximum turned out not to reset between photos.)
+final class FootprintSampler: @unchecked Sendable {
+    private let lock = NSLock()
+    private var peak: UInt64 = 0
+    private let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+
+    init() {
+        timer.schedule(deadline: .now(), repeating: .milliseconds(20))
+        timer.setEventHandler { [weak self] in self?.sample() }
+        timer.resume()
+    }
+
+    /// Stops sampling and returns the peak in MB.
+    func stop() -> Double {
+        timer.cancel()
+        sample()
+        return lock.withLock { Double(peak) / 1_048_576 }
+    }
+
+    private func sample() {
         var info = rusage_info_v4()
         let status = withUnsafeMutablePointer(to: &info) { pointer in
             pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
         }
-        return status == 0 ? Double(info.ri_interval_max_phys_footprint) / 1_048_576 : -1
+        guard status == 0 else { return }
+        lock.withLock { peak = max(peak, info.ri_phys_footprint) }
     }
+}
 
+/// This process's CPU time.
+enum Memory {
     static func cpuSeconds() -> Double {
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)

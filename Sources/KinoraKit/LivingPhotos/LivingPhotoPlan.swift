@@ -99,6 +99,42 @@ public struct LivingPhotoPlan: Equatable, Sendable {
                                seconds: max(2, min(60, seconds)), framesPerSecond: max(10, min(60, framesPerSecond)))
     }
 
+    /// A photo may be at most this many times taller or wider, in shape, than the display.
+    /// Anything beyond is never on screen, since the crop is display-shaped, but would still be
+    /// scaled, masked and filled: a 1240×3043 strip on a 2940×1912 display needed a
+    /// 3175×7795 canvas and about 4 GB.
+    public static let maxShapeSpread = 2.2
+
+    /// True when the photo is so much taller or wider than the display that only part of it is used.
+    public static func needsCutting(photo: CGSize, output: CGSize) -> Bool {
+        workingRegion(photo: photo, output: output, subject: nil).size != photo
+    }
+
+    /// The part of the photo to prepare, in photo pixels with y up: the whole photo, unless it
+    /// is more than `maxShapeSpread` times taller or wider than the display, in which case the
+    /// longer side is cut around the subject (keeping its top and headroom, as framing does),
+    /// or around the middle without one.
+    public static func workingRegion(photo: CGSize, output: CGSize, subject: CGRect?) -> CGRect {
+        let full = CGRect(origin: .zero, size: photo)
+        guard photo.width >= 1, photo.height >= 1, output.width >= 1, output.height >= 1 else { return full }
+        let shape = output.width / output.height, aspect = photo.width / photo.height
+        let subject = subject.map { $0.intersection(full) }.flatMap { $0.isNull || $0.isEmpty ? nil : $0 }
+        if aspect < shape / maxShapeSpread {
+            let height = min(photo.height, max(1, (photo.width * maxShapeSpread / shape).rounded(.down)))
+            var center = photo.height / 2
+            if let subject { center = max(subject.midY, subject.maxY + height * headroom - height / 2) }
+            let y = min(max(center - height / 2, 0), photo.height - height)
+            return CGRect(x: 0, y: y, width: photo.width, height: height)
+        }
+        if aspect > shape * maxShapeSpread {
+            let width = min(photo.width, max(1, (photo.height * shape * maxShapeSpread).rounded(.down)))
+            let center = subject?.midX ?? photo.width / 2
+            let x = min(max(center - width / 2, 0), photo.width - width)
+            return CGRect(x: x, y: 0, width: width, height: photo.height)
+        }
+        return full
+    }
+
     /// The crop's centre: on the subject, keeping its top in view with headroom, inside the canvas.
     ///
     /// A subject taller than the crop allows is aligned by its top, as in the spike, so a
