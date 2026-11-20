@@ -1,0 +1,18 @@
+# Photos for the Living Photos evaluation (Tests/KinoraMediaTests/LivingPhotoEvaluation.swift).
+# They are not stored in the repository. CI downloads each from NASA's Image and Video Library,
+# https://images-assets.nasa.gov/image/<id>/<id>~orig.jpg, and checks its SHA-256 first.
+# NASA imagery is generally not subject to copyright in the United States
+# (https://www.nasa.gov/nasa-brand-center/images-and-media/); JPL's PIA images are
+# NASA/JPL-Caltech. Kinora does not redistribute them.
+#
+# id	what it tests	sha256
+as11-40-5903	one person on a plain landscape (the spike's photo)	e34e716f1dd66040e9fd89454f3a390b11ecd9619321b963b0b7631dffe32021
+jsc2025e078605_alt	studio portrait, tall photo on a wide display	c556944d26b1f023ef2aae4ebaff4f07361527459b2db6fda9527bdfbc70d2e9
+iss036e018174	portrait with loose, floating hair	313ce58c0a099b2591faada88c07121da9e1f79a90b69579004c52f83d6d5e37
+S69-31740	three people side by side	ab870974b7d1ad88038736e5c72aafa19694f1fe2203c8e26a206911f2af6ac4
+KSC00pp0964	two people and an owl, busy background	47713b43e7869cb7ad65166b6c3541ccfec9dfe309134a6903170088583d1489
+NHQ201805030036	fur against a plain backdrop	547548c74521d48ae1fea2d6531458ca2e0ee74a6f53ca3b3eebf17115f241e0
+KSC-2009-1908	small bird among bare branches	fd5a5dd07f4f247f512054f95239490c1b10287a4c6a3ae8e4e41089c049ddf3
+PIA23374	landscape with no subject, small photo	81ebd7eedabfae28ec822e8d1008fc8840b7b977e198319d7f850759c4cd57f2
+KSC-20200715-PH-JBS01_0019	sunset with thin grass silhouettes	a9dbbb92b54dd08bec3f8b19fdc7001277cd355ee8e8d5576c2db13c31252c2f
+PIA03830	very narrow strip	8d1232f36186437a6e057ef8a0ce1b5bcdfb9bc044241f4df082db99c0e84cf7

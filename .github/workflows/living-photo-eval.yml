@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 The Kinora Contributors
+
+# Makes Living Photos from real, public-domain photos (Tests/Fixtures/living-photos.tsv) and
+# uploads the frames and measurements, so a person can judge the quality without a Mac. The
+# photos are downloaded from NASA and checked against their SHA-256; none are kept in the repo.
+# Numbers come from GitHub's virtual Mac and are not a real Mac's.
+
+name: Living Photo evaluation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'Sources/KinoraMedia/**'
+      - 'Sources/KinoraKit/LivingPhotos/**'
+      - 'Tests/KinoraMediaTests/LivingPhotoEvaluation.swift'
+      - 'Tests/Fixtures/living-photos.tsv'
+      - '.github/workflows/living-photo-eval.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: living-photo-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    name: Evaluate Living Photos
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download the photos
+        run: |
+          mkdir -p "$RUNNER_TEMP/photos"
+          grep -v '^#' Tests/Fixtures/living-photos.tsv | while IFS=$'\t' read -r id what sum; do
+            [ -n "$id" ] || continue
+            file="$RUNNER_TEMP/photos/$id.jpg"
+            curl -fsSL --retry 3 --max-time 120 -o "$file" "https://images-assets.nasa.gov/image/$id/$id~orig.jpg"
+            echo "$sum  $file" | shasum -a 256 -c -
+          done
+
+      - name: Evaluate
+        env:
+          KINORA_EVAL_PHOTOS: ${{ runner.temp }}/photos
+          KINORA_EVAL_OUT: ${{ runner.temp }}/living-photo-eval
+        run: |
+          swift test -c release -Xswiftc -enable-testing --filter LivingPhotoEvaluation 2>&1 | tee "$RUNNER_TEMP/eval.log" | grep -E "EVAL|passed|failed|error|Expectation" || true
+          grep -q "Test evaluateRealPhotos() passed" "$RUNNER_TEMP/eval.log"
+
+      - name: Upload frames and measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: living-photo-eval
+          path: ${{ runner.temp }}/living-photo-eval
+          retention-days: 14
+          if-no-files-found: warn

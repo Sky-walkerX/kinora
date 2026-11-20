@@ -71,9 +71,9 @@ public final class LivingPhotoRenderer: @unchecked Sendable {
     public let detection: SubjectDetection
     /// Seconds spent detecting the subject and filling the gap.
     public let prepareSeconds: Double
-    private let background: CIImage
-    private let subject: CIImage?
-    private let context: CIContext
+    let background: CIImage
+    let subject: CIImage?
+    let context: CIContext
 
     /// The largest photo Kinora opens, in pixels: decoding is downsampled to the canvas anyway,
     /// but this keeps a malformed file from asking for gigabytes.
@@ -182,6 +182,20 @@ public final class LivingPhotoRenderer: @unchecked Sendable {
     /// Draws the frame at `t` into a pixel buffer the size of the output.
     func render(at t: Double, into buffer: CVPixelBuffer, colorSpace: CGColorSpace) {
         context.render(frame(at: t), to: buffer, bounds: CGRect(origin: .zero, size: plan.output), colorSpace: colorSpace)
+    }
+
+    /// One layer at `t`, cropped like a frame: the background alone shows how the gap was
+    /// filled; the subject alone, over a flat colour, shows its edge. For evaluation and tests.
+    func layerFrame(at t: Double, subjectOnly: Bool, matte: CIColor = CIColor(red: 1, green: 0, blue: 1)) -> CIImage? {
+        let crop = plan.crop
+        let image: CIImage
+        if subjectOnly {
+            guard let subject else { return nil }
+            image = place(subject, plan.subjectPlacement(at: t)).composited(over: CIImage(color: matte).cropped(to: crop))
+        } else {
+            image = place(background, plan.backgroundPlacement(at: t))
+        }
+        return image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
     }
 
     private func place(_ image: CIImage, _ p: LayerPlacement) -> CIImage {
