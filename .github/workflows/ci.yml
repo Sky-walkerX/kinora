@@ -32,7 +32,9 @@ jobs:
           xcrun --sdk macosx --show-sdk-version
 
       - name: Test
-        run: ./build.sh test
+        run: |
+          set -o pipefail
+          ./build.sh test 2>&1 | tee "$RUNNER_TEMP/test.log"
 
       - name: Build
         run: |
@@ -46,3 +48,9 @@ jobs:
         env:
           KINORA_BENCH: "1"
         run: swift test -c release -Xswiftc -enable-testing --filter benchmark 2>&1 | grep -E "BENCH|passed|failed|error" || true
+
+      # Last, so the end of the log shows them: what this Mac's AVFoundation opens
+      # (ContainerProbeTests) and the test totals.
+      - name: Summary
+        if: always()
+        run: grep -E "PROBE|Test run with|Executed [0-9]+ test" "$RUNNER_TEMP/test.log" || true
