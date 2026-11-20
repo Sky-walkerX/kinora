@@ -239,9 +239,12 @@ public struct LivingPhotoPlan: Equatable, Sendable {
         public var seamSoftness: Double
     }
 
-    /// A subject mask is worth lifting when it covers between 0.2% and 85% of the photo. Less is
-    /// noise; more leaves too little background to fill the gap from.
-    public static func isUsableSubject(coverage: Double) -> Bool { coverage >= 0.002 && coverage <= 0.85 }
+    /// A subject mask is worth lifting when it covers between 0.5% and 85% of the photo. Less is
+    /// noise, or something like the sun in a sunset, which then moves against the sea with the
+    /// wrong depth (seen in the evaluation at 0.2%); a small bird on a branch covered 1%. More
+    /// leaves too little background to fill the gap from.
+    public static let smallestSubject = 0.005
+    public static func isUsableSubject(coverage: Double) -> Bool { coverage >= smallestSubject && coverage <= 0.85 }
 
     public var fill: Fill {
         let w = canvas.width

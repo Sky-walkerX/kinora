@@ -235,6 +235,13 @@ import Testing
         #expect(low.minY == 0 && low.maxY <= tall.height)
     }
 
+    @Test func liftsOnlySubjectsOfAUsefulSize() {
+        #expect(!LivingPhotoPlan.isUsableSubject(coverage: 0.002), "the sun in a sunset")
+        #expect(LivingPhotoPlan.isUsableSubject(coverage: 0.01), "a small bird on a branch")
+        #expect(LivingPhotoPlan.isUsableSubject(coverage: 0.6), "three people filling the frame")
+        #expect(!LivingPhotoPlan.isUsableSubject(coverage: 0.9))
+    }
+
     @Test func cutsAPanoramaAroundItsSubject() {
         let panorama = CGSize(width: 12000, height: 1500)
         let subject = CGRect(x: 9000, y: 200, width: 600, height: 900)
