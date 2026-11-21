@@ -56,7 +56,7 @@ struct ContentView: View {
         }
         .navigationTitle("Kinora")
         .navigationSubtitle(subtitle)
-        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.movie, .image, .folder, .kinoraPackage], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.movie, .webmVideo, .matroskaVideo, .image, .folder, .kinoraPackage], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             Task {
                 let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
@@ -188,4 +188,7 @@ private struct PlaylistRow: View {
 extension UTType {
     /// A Kinora wallpaper package, a zip with a `.kinorawallpaper` extension (docs/FORMAT.md).
     static let kinoraPackage = UTType(exportedAs: "io.github.sky-walkerx.kinora.wallpaper-package", conformingTo: .zip)
+    /// WebM and Matroska video, which Kinora converts at import (declared in Info.plist).
+    static let webmVideo = UTType(importedAs: "org.webmproject.webm", conformingTo: .movie)
+    static let matroskaVideo = UTType(importedAs: "org.matroska.mkv", conformingTo: .movie)
 }

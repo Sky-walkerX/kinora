@@ -103,8 +103,7 @@ public enum ForeignWallpaper {
     public static func support(_ wallpaper: Wallpaper) -> Result<String, Unsupported> {
         switch wallpaper.kind {
         case .video(let file), .gif(let file), .picture(let file):
-            let ext = (file as NSString).pathExtension.lowercased()
-            if ["webm", "mkv"].contains(ext) { return .failure(.webm) }
+            // WebM and Matroska video is converted at import, like any other video.
             return .success(file)
         case .web: return .failure(.web)
         case .scene: return .failure(.scene)
@@ -115,12 +114,10 @@ public enum ForeignWallpaper {
     }
 
     public enum Unsupported: Error, Equatable, Sendable, CustomStringConvertible {
-        case webm, web, scene, program, stream, elsewhere, unknown
+        case web, scene, program, stream, elsewhere, unknown
 
         public var description: String {
             switch self {
-            case .webm:
-                "Its video is WebM or MKV, which macOS can't open directly. Kinora can't convert these yet; convert it to MP4 (H.264 or HEVC) first."
             case .web:
                 "It's a web wallpaper. Kinora doesn't show web wallpapers yet: whether they can run safely inside macOS's wallpaper system is still being tested."
             case .scene:

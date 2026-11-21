@@ -59,9 +59,10 @@ import Testing
 
     @Test func explainsWhatItCannotImport() throws {
         #expect(ForeignWallpaper.support(try #require(engine(#"{"type":"scene"}"#))) == .failure(.scene))
-        #expect(ForeignWallpaper.support(try #require(engine(#"{"type":"video","file":"v.webm"}"#))) == .failure(.webm))
+        // WebM is converted at import now, not refused.
+        #expect(ForeignWallpaper.support(try #require(engine(#"{"type":"video","file":"v.webm"}"#))) == .success("v.webm"))
         #expect(ForeignWallpaper.support(try #require(lively(#"{"Type":0,"FileName":"a.exe"}"#))) == .failure(.program))
-        for problem in [ForeignWallpaper.Unsupported.webm, .web, .scene, .program, .stream, .elsewhere, .unknown] {
+        for problem in [ForeignWallpaper.Unsupported.web, .scene, .program, .stream, .elsewhere, .unknown] {
             #expect(!problem.description.isEmpty)
         }
     }

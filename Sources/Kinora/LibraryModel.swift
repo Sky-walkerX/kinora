@@ -50,6 +50,8 @@ import UniformTypeIdentifiers
                     items.append(try await Task.detached { try Self.makeStillItem(from: url, in: location, display: display) }.value)
                 } else if Self.isPackage(url) {
                     _ = try await PackageInstaller.install(url, into: self)
+                } else if MatroskaConverter.isMatroska(url) {
+                    items.append(try await ForeignImporter.importMatroska(url, library: self, display: display, name: nil))
                 } else {
                     items.append(try await Self.makeItem(from: url, in: location, display: display))
                 }
@@ -60,6 +62,8 @@ import UniformTypeIdentifiers
                 lastError = failure.errorDescription
             } catch let failure as PackageSource.Failure {
                 lastError = "Kinora can't import “\(url.lastPathComponent)”. \(failure.errorDescription ?? "")"
+            } catch let failure as MatroskaConversionError {
+                if failure != .cancelled { lastError = "Kinora can't import “\(url.lastPathComponent)”. \(failure.description)" }
             } catch let problem as PackageProblem {
                 lastError = "This isn't a wallpaper Kinora can install. \(problem.description)"
             } catch {
@@ -265,21 +269,22 @@ import UniformTypeIdentifiers
             for case let file as URL in walker {
                 if walker.level > 3 { walker.skipDescendants(); continue }
                 guard let values = try? file.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
-                      let type = values.contentType, type.conforms(to: .movie) || type.conforms(to: .image) else { continue }
+                      let type = values.contentType,
+                      type.conforms(to: .movie) || type.conforms(to: .image) || Self.matroskaExtensions.contains(file.pathExtension.lowercased())
+                else { continue }
                 files.append(file)
             }
         }
         return files
     }
 
-    /// Says why files were not imported, naming formats Kinora knows it cannot play.
+    /// WebM and Matroska, which Kinora converts itself; macOS may not call them movies.
+    nonisolated static let matroskaExtensions: Set<String> = ["webm", "mkv", "mk3d"]
+
+    /// Says why files were not imported.
     nonisolated static func unsupportedMessage(_ names: [String]) -> String {
         let list = names.prefix(4).joined(separator: ", ") + (names.count > 4 ? " and \(names.count - 4) more" : "")
-        let webm = names.contains { ["webm", "mkv"].contains(($0 as NSString).pathExtension.lowercased()) }
-        if webm {
-            return "Kinora can't play \(list). WebM and MKV videos aren't supported yet: macOS can't open them directly. Convert them to MP4 or MOV first."
-        }
-        return "Kinora can't play \(list). Try an MP4 or MOV video, or a JPEG, HEIC or PNG picture."
+        return "Kinora can't play \(list). Try an MP4, MOV, WebM or MKV video, or a JPEG, HEIC or PNG picture."
     }
 
     /// Imports a video: converted once for the display when that saves space, else copied.

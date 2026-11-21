@@ -84,12 +84,29 @@ enum ForeignImporter {
                 try LibraryModel.makeStillItem(from: media, in: location, display: display, allowedTypes: LibraryModel.packageImageTypes)
             }
         default:
-            item = try await LibraryModel.makeItem(from: media, in: library.location, display: display)
+            if MatroskaConverter.isMatroska(media) {
+                item = try await importMatroska(media, library: library, display: display, name: wallpaper.title)
+            } else {
+                item = try await LibraryModel.makeItem(from: media, in: library.location, display: display)
+            }
         }
         item.name = wallpaper.title
         item.attribution = LibraryItem.Attribution(
             author: wallpaper.author,
             license: wallpaper.license ?? (source == .wallpaperEngine ? "From Wallpaper Engine; for your own use" : nil))
+        return item
+    }
+
+    /// Converts a WebM or Matroska video to HEVC once, as macOS can't open those containers.
+    @MainActor static func importMatroska(_ url: URL, library: LibraryModel, display: CGSize, name: String?) async throws -> LibraryItem {
+        let work = try library.makeWorkFolder()
+        defer { LibraryModel.removeWork(work) }
+        let converted = work.appendingPathComponent("converted.mov")
+        _ = try await MatroskaConverter.convert(url, to: converted, display: display)
+        // Already encoded for the display, so it is not encoded twice.
+        var item = try await LibraryModel.makeItem(from: converted, in: library.location, display: display, optimize: false)
+        item.name = name ?? url.deletingPathExtension().lastPathComponent
+        item.originalBytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
         return item
     }
 
