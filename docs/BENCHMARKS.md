@@ -61,6 +61,28 @@ What the frames show:
 - **Weak spots that remain:** fine hair strands Vision leaves out of the mask stay in the background and won't move with the head; a person partly hidden behind another can be split between the layers (KSC00pp0964), which may show as a tear of up to the subject's relative shift (about 12 px at 2940 wide); the fill inside large gaps is smooth or streaky, but only a thin band beside the subject is ever revealed.
 - **Loop seam:** the decoded last frame differs from the first 1.2–2× as much as the largest ordinary frame-to-frame step. The motion itself closes exactly (tested), so this comes from encoding, probably the first keyframe's quality. Small (under 1% of the luma range on average), but it is the kind of flicker users notice at loop points; check it on a real display, and if it shows, try encoder pre-roll or constant-quality encoding.
 
+### The loop seam and pre-roll (CI, 2026-11-21, run on f8134a1)
+
+The evaluation now also encodes each loop with its last 15 frames encoded first, before the session's start, so the encoder reaches frame 0 warmed up and the file's edit list hides them (`LivingPhotoGenerator.encode(preroll:)`, not used by the app).
+
+| Photo | Seam / largest step, as shipped | With pre-roll | Size, as shipped → pre-roll |
+|---|---|---|---|
+| KSC-2009-1908 | 1.87 / 1.10 | 1.62 / 0.95 | 12.3 → 13.6 MB |
+| KSC-20200715-PH-JBS01_0019 | 2.00 / 1.78 | 1.80 / 1.76 | 13.9 → 15.0 MB |
+| KSC00pp0964 | 1.57 / 0.99 | 1.44 / 1.00 | 11.4 → 12.7 MB |
+| NHQ201805030036 | 1.95 / 1.49 | 1.66 / 1.40 | 13.8 → 15.0 MB |
+| PIA03830 | 0.79 / 0.48 | 0.77 / 0.47 | 5.2 → 6.0 MB |
+| PIA23374 | 2.45 / 2.31 | 2.23 / 2.23 | 12.0 → 13.2 MB |
+| S69-31740 | 1.68 / 1.20 | 1.49 / 1.10 | 12.6 → 13.9 MB |
+| as11-40-5903 | 1.42 / 0.76 | 1.25 / 0.73 | 11.3 → 12.6 MB |
+| iss036e018174 | 1.85 / 1.24 | 1.70 / 1.12 | 12.7 → 14.0 MB |
+| jsc2025e078605_alt | 1.37 / 0.94 | 1.31 / 0.93 | 11.7 → 12.9 MB |
+
+- The pre-rolled files decode to exactly 360 frames and 12.00 s, so the edit list works with AVFoundation's reader. Whether AVPlayerLooper loops such a file without a gap is not tested.
+- Pre-roll lowers the seam only 2–15% and costs 5–15% more disk, so **Kinora keeps encoding without it.**
+- Why it helps so little: neighbouring frames decoded from one prediction chain share most of their coding error, which cancels in their difference. The loop's last and first frames always come from different chains, so their errors add, whether or not the encoder was warmed up. The motion itself closes exactly (tested). What's left is coding noise of about 1–2 luma levels on average (of 255) at the loop point. If it shows on a real display, a higher bitrate for Living Photos is the next thing to try, measured with the same workflow.
+- Generation and playback cost on this run: 9.8–27.9 s per photo; decoding the loop took 0.51–0.68 s of CPU per 12 s (4.3–5.7% of one core, virtual Mac); live Core Image compositing 28–59 ms a frame.
+
 ## Living Photos: video or real-time?
 
 Living Photos are rendered once into HEVC and play through the same hardware decoder as any video. A real-time renderer in the plug-in would draw two textured layers every frame instead. It might cost less than decoding for such slow motion, but it would hold both full-resolution layers in the plug-in's memory (about 40 MB each at 3176×3195) and would need its own snapshot and power handling. No measurement yet shows the video path costing too much, so Kinora keeps it. Compare the two on a real Mac with `Tools/measure-plugin.sh` before changing course.

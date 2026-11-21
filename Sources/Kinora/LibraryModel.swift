@@ -22,6 +22,8 @@ import UniformTypeIdentifiers
 
     init(location: LibraryLocation = .current) {
         self.location = location
+        // Before any video work starts, so it never overlaps one (see prepareDecoders).
+        MatroskaConverter.prepareDecoders()
         load()
         clearWork()
     }

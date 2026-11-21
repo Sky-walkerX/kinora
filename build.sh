@@ -88,7 +88,8 @@ install_dev() {
 case "${1:-release}" in
     release) build_release ;;
     dev) build_dev ;;
-    test) swift test ;;
+    # One test at a time: the media tests share VideoToolbox, and the whole run takes seconds.
+    test) swift test --no-parallel ;;
     install) install_dev ;;
     clean) rm -rf "$OUT" .build ;;
     *) echo "usage: $0 [release|dev|test|install|clean]" >&2; exit 64 ;;

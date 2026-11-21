@@ -11,7 +11,7 @@ import Testing
 /// Converts the synthetic fixtures in Tests/Fixtures/containers (ffmpeg's testsrc2, 96×64,
 /// 10 frames) and compares every frame with AVFoundation's own decode of `hevc.mp4`, made from
 /// the same pattern, so wrong colours, wrong frames or a wrong order all show.
-@Suite(.serialized) struct MatroskaConverterTests {
+@Suite(.serialized, .timeLimit(.minutes(3))) struct MatroskaConverterTests {
     static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Fixtures/containers", isDirectory: true)
     static let display = CGSize(width: 2560, height: 1600)

@@ -71,6 +71,17 @@ public enum MatroskaConverter {
     /// Most frames H.264 and HEVC hold back before showing (their largest picture buffer).
     static let reorderDepth = 16
 
+    /// Asks VideoToolbox for its supplemental decoders (VP9), once per process. The app does it
+    /// at launch, before any video work, so registering never overlaps a decoder or encoder
+    /// session starting elsewhere; CI once saw every VideoToolbox user stall together in a run
+    /// where those overlapped. Later calls do nothing.
+    public static func prepareDecoders() { _ = registeredDecoders }
+
+    private static let registeredDecoders: Bool = {
+        VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
+        return true
+    }()
+
     /// True for files named or shaped like Matroska or WebM.
     public static func isMatroska(_ url: URL) -> Bool {
         if ["webm", "mkv", "mk3d"].contains(url.pathExtension.lowercased()) { return true }
@@ -134,8 +145,8 @@ public enum MatroskaConverter {
             throw MatroskaConversionError.damaged
         }
 
-        // VP9's decoder is supplemental: each process asks for it.
-        if codec == .vp9 { VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9) }
+        // VP9's decoder is supplemental: each process asks for it, once.
+        prepareDecoders()
         var formatOut: CMVideoFormatDescription?
         let extensions: [CFString: Any] = [kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms: [atom: record] as CFDictionary]
         guard CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: codecType, width: Int32(track.pixelWidth),

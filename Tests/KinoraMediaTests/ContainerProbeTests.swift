@@ -4,6 +4,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import KinoraMedia
 import Testing
 import VideoToolbox
 
@@ -66,7 +67,8 @@ import VideoToolbox
             }
         }
         // The supplemental VP9 decoder is opt-in per process; see whether it changes anything.
-        VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
+        // Registered the way the app does it, once per process.
+        MatroskaConverter.prepareDecoders()
         print("PROBE after registering the supplemental VP9 decoder: hardware VP9 \(VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9))")
         for name in ["vp9.webm", "vp9.mkv"] { print("PROBE (VP9 registered) \(await Self.probe(name))") }
     }
