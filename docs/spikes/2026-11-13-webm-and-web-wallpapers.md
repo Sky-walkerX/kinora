@@ -22,7 +22,7 @@ Built on 2026-11-21, as planned:
 - `MatroskaConverter` (KinoraMedia) decodes with `VTDecompressionSession` (VP9 after registering the supplemental decoder), puts B-frames back in presentation order, and encodes HEVC once at the display's size through `AVAssetWriter`, then the item goes through the ordinary library path. 10- and 12-bit sources are converted to 8 bits; colour is written as BT.709.
 - Fixtures (synthetic, `Tests/Fixtures/containers/README.md`): VP9 plain, live (unknown sizes), with superframes, 10-bit and with alpha; H.264 and HEVC with B-frames in MKV; VP8; AV1.
 
-CI results for the converter are in the handoff. Still to check on a real Mac: real Lively and Workshop WebM files the owner already has (none are shipped as fixtures), long and 4K files (time and memory), and VP9 decoding on Apple silicon hardware rather than the runner's virtual decoder.
+Observed on CI (2026-11-21, run 34): every VP9, H.264 and HEVC fixture converts to 10 frames and 1.0 s, each frame closer to the HEVC reference's decode than its neighbour is. The runner reports AV1 hardware decode but can't create an AV1 decoder session, so AV1 conversion is untested and refused by name there. Still to check on a real Mac: real Lively and Workshop WebM files the owner already has (none are shipped as fixtures), long and 4K files (time and memory), and VP9 decoding on Apple silicon hardware rather than the runner's virtual decoder.
 
 ## Web wallpapers: the WebKit-in-plug-in spike
 

@@ -41,10 +41,10 @@ CI on the inherited state was green (macOS 26 runner, 197 tests). I read the cod
 
 **Observed on GitHub's `macos-26` runner** (virtual Apple-silicon Mac, Swift 6.3.3). Not a real Mac: no WallpaperAgent, no Lock Screen, paravirtual GPU, encoder and decoders.
 
-- `./build.sh test`: **232 tests in 44 suites pass** (run 30, ca9296e), including the Matroska reader and converter and the rules fixes. `./build.sh` builds the universal release bundle and signs it ad hoc.
-- **WebM and MKV conversion:** every fixture converts (`MatroskaConverterTests`): VP9 plain, live with unknown sizes, with superframes, 10-bit and with alpha, and H.264 and HEVC with B-frames, 10 frames and 1 s each, and every converted frame matches AVFoundation's decode of the HEVC reference more closely than its neighbours do, so colours, frames and order are right. VP8 is refused by name; a cut-off file keeps its whole frames; Stop leaves nothing. AV1 converts or is refused by name depending on the Mac (the runner reports an AV1 decoder).
+- `./build.sh test`: **237 tests in 46 suites pass**, one at a time, in 30 s (run 34, 09ddcb0), including the Matroska reader and converter, the rules fixes and the Living Photo copy. `./build.sh` builds the universal release bundle and signs it ad hoc. Benchmarks unchanged: originals 1.0–3.5 ms GPU per frame; a 4032×3024 synthetic Living Photo in 19.5 s, 10.6 MB.
+- **WebM and MKV conversion:** VP9 plain, live with unknown sizes, with superframes, 10-bit and with alpha, and H.264 and HEVC with B-frames in MKV all convert to HEVC: 10 frames, 1.0 s, no frame skipped. Every converted frame is closer to AVFoundation's decode of the HEVC reference (mean luma difference 6.2–7.5, two lossy encodings of one pattern) than the neighbouring frame is (9.0–9.4), so colours, frames and order are right. VP8 is refused by name; a cut-off file keeps its whole frames; Stop leaves nothing. **AV1 is untested:** the runner reports AV1 hardware decode yet can't create an AV1 decoder session, so it is refused by name there.
+- **App Intents metadata:** the release bundle carries `Metadata.appintents` (`extract.actionsdata`, `version.json`, from 23 constant-value files) naming Pause, Resume, Next and Set Desktop Motion.
 - **Living Photo evaluation** on the ten real photos passed after this session's changes (runs on aeed3df and f8134a1). **Pre-roll measured and not adopted:** it lowered the loop seam only 2–15% for 5–15% more disk; the seam is mostly coding noise that the last and first frames can't share, about 1–2 luma levels of 255 ([numbers](BENCHMARKS.md#the-loop-seam-and-pre-roll-ci-2026-11-21-run-on-f8134a1)). Decoding a loop took 4.3–5.7% of one core on the virtual Mac.
-- **App Intents metadata:** the build step is new in 35ea15f; whether CI's Xcode produced `Metadata.appintents`, and which actions it names, is printed in the "Build" step of the CI log.
 
 - **An intermittent CI hang:** in one of four runs (run 33, on f8134a1, cancelled after 13 minutes), every test using VideoToolbox stalled at the same moment: the first WebM conversion, the container probe's HEVC decode, Living Photo and GIF encoding. Everything else passed. The cause isn't established; the likeliest is registering the supplemental VP9 decoder while other decoder and encoder sessions start, which the parallel tests did. Since then the decoder is registered once per process, by the app at launch, and `./build.sh test` runs tests one at a time, with a time limit on the conversion tests. If it recurs, look there first.
 
@@ -77,7 +77,7 @@ Build: `git checkout claude/gifted-darwin-5mxp6s && ./build.sh test && ./build.s
 
 **WebM and MKV**
 - [ ] Add a Lively WebM wallpaper (folder and zip) and a Wallpaper Engine video wallpaper whose file is WebM: both import and play. Note how long a 1080p and a 4K one take.
-- [ ] Add a plain `.webm` and `.mkv` from Finder, by drag and through Add: they import. A VP8 WebM says it's VP8.
+- [ ] Add a plain `.webm` and `.mkv` from Finder, by drag and through Add: they import. A VP8 WebM says it's VP8. An AV1 WebM converts on an M3 or later Mac and says this Mac can't decode AV1 on older ones (CI couldn't test AV1).
 
 **Originals**
 - [ ] Each shows and moves on the desktop and Lock Screen; System Settings › Wallpaper has a "Kinora Originals" group.
