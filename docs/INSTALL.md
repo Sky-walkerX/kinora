@@ -18,6 +18,7 @@ What that means for someone installing a downloaded copy:
 - **Apple hasn't scanned it.** Notarization runs an automated malware scan and lets Apple revoke a build later. Without it, users rely on the source being public, the build being reproducible, and the checksum matching.
 - **Signatures prove less.** A self-signed certificate shows that every build came from the same key, so macOS keeps Kinora's permissions across updates, but it doesn't identify a person or company to macOS.
 - **Some people won't install it.** Reactions like "Not signed. Yeah, no." are common (see the competitor research). That costs users, not safety.
+- **Possibly: Shortcuts actions that list but don't run.** Kinora's bundle carries App Intents metadata, so Shortcuts should list its actions. Other projects building outside Xcode report that running such actions needs a signature with a team ID (Apple Development or Developer ID), which a self-signed or ad hoc Kinora doesn't have. Not yet checked on a Mac; `kinora://` links work either way.
 - **Unverified: the plug-in after Open Anyway.** Whether a quarantined, self-signed copy's wallpaper plug-in launches inside WallpaperAgent after Open Anyway is not yet tested. It must be checked before the first release (owner checklist below). If it fails, onboarding will need a documented re-enable step.
 
 What users can check themselves:

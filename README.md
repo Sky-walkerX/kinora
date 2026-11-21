@@ -2,7 +2,7 @@
 
 Live wallpapers for your Mac, on the desktop and on the Lock Screen. Free and open source.
 
-> **Status:** early development. There is no release yet. Living Photos, Kinora Originals, the wallpaper format, the gallery client and the Lively and Wallpaper Engine imports are new: they build and pass their tests on macOS CI, but haven't yet been checked on screen on a real Mac.
+> **Status:** early development. There is no release yet. Living Photos, Kinora Originals, the wallpaper format, the gallery client, WebM and MKV conversion and the Lively and Wallpaper Engine imports are new: they build and pass their tests on macOS CI, but haven't yet been checked on screen on a real Mac.
 
 For current implementation status, what has and hasn't been verified on a real Mac, and a copyable continuation prompt, see [the development handoff](docs/HANDOFF.md).
 
@@ -16,7 +16,7 @@ For current implementation status, what has and hasn't been verified on a real M
 - Your own videos, pictures and GIFs, converted once to a size your display needs, with the disk space saved shown. Apple's downloaded aerials, played in place.
 - Playlists, a time-of-day schedule, and separate Lock Screen and Dark Mode wallpapers.
 - An [open wallpaper format](docs/FORMAT.md) anyone can publish in, without Steam or a purchase, and a gallery of wallpapers that are free to share (not yet published).
-- Imports video wallpapers from Lively and Wallpaper Engine folders you already have, and says plainly what it can't import.
+- Imports video wallpapers from Lively and Wallpaper Engine folders you already have, including WebM and MKV videos, which Kinora converts itself, and says plainly what it can't import.
 - No account, no paywall, no telemetry. It only goes online when you browse the gallery or check for updates.
 
 ## How it works
