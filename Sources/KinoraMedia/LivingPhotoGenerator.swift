@@ -95,7 +95,12 @@ public enum LivingPhotoGenerator {
 
     /// Renders every frame of the loop into a video, HEVC where the Mac can encode it, else
     /// H.264. Returns the codec used.
-    static func encode(_ renderer: LivingPhotoRenderer, to url: URL, flag: CancellationFlag,
+    ///
+    /// `preroll` is an experiment the evaluation measures, off in the app: the loop's last frames
+    /// are encoded first, before the session's start, so the encoder reaches the loop's first
+    /// frame already warmed up and the file's edit list skips them. Whether that smooths the
+    /// loop's seam, and whether playback still loops without a gap, needs measuring.
+    static func encode(_ renderer: LivingPhotoRenderer, to url: URL, flag: CancellationFlag, preroll: Int = 0,
                        progress: (Double) -> Void) throws -> String {
         let plan = renderer.plan
         let width = Int(plan.output.width), height = Int(plan.output.height)
@@ -150,7 +155,9 @@ public enum LivingPhotoGenerator {
         }
 
         let frames = plan.frameCount
-        for index in 0..<frames {
+        let warmup = min(max(0, preroll), frames - 1)
+        for step in -warmup..<frames {
+            let index = (step + frames) % frames
             if flag.isCancelled { throw abandon(.cancelled) }
             // The encoder works in the background; wait for room, but never forever.
             var waited = 0
@@ -166,11 +173,11 @@ public enum LivingPhotoGenerator {
                 throw abandon(.writeFailed("out of memory for frames"))
             }
             renderer.render(at: plan.phase(ofFrame: index), into: buffer, colorSpace: colorSpace)
-            let time = CMTime(value: CMTimeValue(index), timescale: CMTimeScale(plan.framesPerSecond))
+            let time = CMTime(value: CMTimeValue(step), timescale: CMTimeScale(plan.framesPerSecond))
             guard adaptor.append(buffer, withPresentationTime: time) else {
                 throw abandon(.writeFailed(writer.error?.localizedDescription ?? "a frame could not be encoded"))
             }
-            if index % 6 == 0 || index == frames - 1 { progress(Double(index + 1) / Double(frames)) }
+            if step >= 0, step % 6 == 0 || step == frames - 1 { progress(Double(step + 1) / Double(frames)) }
         }
         input.markAsFinished()
         // The last frame lasts one frame, so the loop is exactly frameCount frames long.

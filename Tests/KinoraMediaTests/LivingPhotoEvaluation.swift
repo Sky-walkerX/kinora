@@ -77,6 +77,18 @@ import UniformTypeIdentifiers
 
         // The finished video: is the loop's seam as smooth as any other step, and what does decoding cost?
         let playback = try await decode(result.video)
+        // The pre-roll experiment: the same loop, its last frames encoded first and edited out.
+        let primedURL = folder.appendingPathComponent("primed.mov")
+        var primed = Playback()
+        var primedError: String?
+        do {
+            _ = try LivingPhotoGenerator.encode(renderer, to: primedURL, flag: CancellationFlag(), preroll: 15) { _ in }
+            primed = try await decode(primedURL)
+        } catch {
+            primedError = "\(error)"
+        }
+        let primedBytes = ((try? FileManager.default.attributesOfItem(atPath: primedURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        try? FileManager.default.removeItem(at: primedURL)
         // Drawing the same frames live instead: Core Image compositing at full size.
         let live = liveCompositeMilliseconds(renderer, frames: 45)
 
@@ -91,6 +103,9 @@ import UniformTypeIdentifiers
             "seamLumaDiff": playback.seam, "meanStepLumaDiff": playback.meanStep, "maxStepLumaDiff": playback.maxStep,
             "decodeWallSeconds": playback.wallSeconds, "decodeCPUSeconds": playback.cpuSeconds, "videoSeconds": playback.videoSeconds,
             "liveCompositeMsPerFrame": live,
+            "primedFrames": primed.frames, "primedSeamLumaDiff": primed.seam, "primedMaxStepLumaDiff": primed.maxStep,
+            "primedVideoSeconds": primed.videoSeconds, "primedMegabytes": Double(primedBytes) / 1_000_000,
+            "primedError": primedError ?? NSNull(),
         ]
         let json = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
         try json.write(to: folder.appendingPathComponent("metrics.json"))
@@ -106,7 +121,8 @@ import UniformTypeIdentifiers
             + "seam luma diff \(f(playback.seam)) vs steps mean \(f(playback.meanStep)) max \(f(playback.maxStep)); "
             + "decode \(f(playback.cpuSeconds)) CPU s for \(f(playback.videoSeconds, 0)) s of video "
             + "(\(f(playback.cpuSeconds / max(0.001, playback.videoSeconds) * 100, 1))% of a core); "
-            + "live composite \(f(live, 1)) ms/frame (\(f(live * 30 / 10, 1))% of 30 fps frame time)"
+            + "live composite \(f(live, 1)) ms/frame (\(f(live * 30 / 10, 1))% of 30 fps frame time); "
+            + "primed: \(primedError ?? "frames \(primed.frames), \(f(primed.videoSeconds)) s, seam \(f(primed.seam)) vs max step \(f(primed.maxStep)), \(f(Double(primedBytes) / 1_000_000, 1)) MB")"
     }
 
     // MARK: - Pieces
@@ -168,7 +184,8 @@ import UniformTypeIdentifiers
         var first: [UInt8]?, previous: [UInt8]?
         var steps: [Double] = []
         while let sample = output.copyNextSampleBuffer() {
-            guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
+            // Frames before zero are pre-roll the edit list hides, if the reader hands them out.
+            guard let buffer = CMSampleBufferGetImageBuffer(sample), CMSampleBufferGetPresentationTimeStamp(sample).seconds >= 0 else { continue }
             let luma = sampledLuma(buffer)
             if let previous { steps.append(meanDifference(previous, luma)) }
             if first == nil { first = luma }
