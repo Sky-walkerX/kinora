@@ -4,33 +4,25 @@ Date: 2026-11-13, updated 2026-11-20. Written in Linux cloud sessions with GitHu
 
 ## What Kinora does today
 
-- **WebM and MKV** files, imported directly or named by a Lively or Wallpaper Engine manifest, are refused with: "Its video is WebM or MKV, which macOS can't open directly … convert it to MP4 (H.264 or HEVC) first." Detection is by extension, and AVFoundation's own `isPlayable` check catches the rest.
+- **WebM and MKV** (updated 2026-11-21): converted to HEVC once, at import, by Kinora's own reader and VideoToolbox; see "WebM" below. VP8, and AV1 on Macs without an AV1 decoder, are explained by name ("Its video is VP8, which macOS can't decode. Convert it to MP4 (H.264 or HEVC) first.").
 - **Web wallpapers** (Lively `web`, `webaudio` and `url`; Wallpaper Engine `web`) are refused with: "Kinora doesn't show web wallpapers yet: whether they can run safely inside macOS's wallpaper system is still being tested."
 - **Wallpaper Engine scenes** are refused as needing a renderer Kinora doesn't have. They stay out of scope.
 
 ## WebM
-
-Known:
-
-- AVFoundation plays MP4 and QuickTime containers. Matroska and WebM are not among the containers `AVURLAsset` documents, and Kinora's design assumes they don't open. Safari plays WebM through WebKit's own parser, which apps can't use for files.
-- macOS has a VP9 decoder in VideoToolbox, enabled per process with `VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)`. AV1 decoding exists in hardware on M3 and later.
-- VP8 has no system decoder.
 
 Observed on GitHub's macOS 26 runner on 2026-11-20 (`ContainerProbeTests`, with one-second ffmpeg test patterns in `Tests/Fixtures/containers/`):
 
 1. **AVFoundation does not open WebM or Matroska.** VP9 in WebM, VP9 in MKV, VP8 in WebM and AV1 in WebM all fail with "Cannot Open": not playable, no tracks. HEVC in MP4 opens and decodes all 10 frames.
 2. **Registering the supplemental VP9 decoder doesn't change that**, but afterwards `VTIsHardwareDecodeSupported(VP9)` turns true (false before). HEVC and AV1 report hardware decode on that runner. So VideoToolbox can decode VP9 frames once Kinora hands them over; only the container is missing.
 
-Still to check on a real Mac: the same probe on macOS 27 and Apple silicon hardware (the runner's GPU and decoders are virtual), and that a `VTDecompressionSession` actually decodes VP9 frames from a real WebM.
+Built on 2026-11-21, as planned:
 
-Plan, since (1) is false and (2) looks workable, as the design's milestone 6 describes:
+- `MatroskaReader` (KinoraKit, pure Swift, no FFmpeg) walks EBML on demand: the first enabled video track, SimpleBlocks and BlockGroups, Xiph, EBML and fixed lacing, unknown-size segments and clusters (browser recordings), cut-off files up to their last whole frame, header stripping undone; encryption and real compression refused. Every size is checked against its parent and the file; headers, frames, track counts and picture sizes are capped.
+- `MatroskaCodecs` builds what VideoToolbox needs: `avcC`, `hvcC` and `av1C` from CodecPrivate, and for VP9 a `vpcC` record from the first keyframe's uncompressed header (profile, bit depth, subsampling, colour), with the VP9 level from size and rate. Superframes are split to find the keyframe.
+- `MatroskaConverter` (KinoraMedia) decodes with `VTDecompressionSession` (VP9 after registering the supplemental decoder), puts B-frames back in presentation order, and encodes HEVC once at the display's size through `AVAssetWriter`, then the item goes through the ordinary library path. 10- and 12-bit sources are converted to 8 bits; colour is written as BT.709.
+- Fixtures (synthetic, `Tests/Fixtures/containers/README.md`): VP9 plain, live (unknown sizes), with superframes, 10-bit and with alpha; H.264 and HEVC with B-frames in MKV; VP8; AV1.
 
-- A small Matroska/EBML reader in Swift (no FFmpeg): walk `Segment` → `Tracks` for the codec ID (`V_VP9`, `V_AV1`, `V_VP8`) and size, then `Cluster` → `SimpleBlock`/`BlockGroup` for frames and timestamps. Lacing and audio are skipped; wallpapers are silent.
-- Wrap each frame in a `CMSampleBuffer` with a VP9 format description (codec private data from `CodecPrivate` or the first frame's header), decode with `VTDecompressionSession`, and feed the pixel buffers to the existing HEVC writer, once, at import.
-- VP8 and anything that fails to decode keeps today's message.
-- Validate on real Lively and Workshop WebM files the owner already has; ship no third-party media as fixtures. Synthetic fixtures can be made with `ffmpeg` on the owner's Mac and kept out of the repository if their encoder's licensing is in doubt.
-
-Estimated size: a few hundred lines for the reader, plus tests on hand-built EBML and the probe's fixtures. Conversion is a one-time import cost, so playback is unaffected.
+CI results for the converter are in the handoff. Still to check on a real Mac: real Lively and Workshop WebM files the owner already has (none are shipped as fixtures), long and 4K files (time and memory), and VP9 decoding on Apple silicon hardware rather than the runner's virtual decoder.
 
 ## Web wallpapers: the WebKit-in-plug-in spike
 

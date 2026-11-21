@@ -80,6 +80,9 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
     /// A package from a file never replaces one from the gallery, or the other way round.
     public var packageOrigin: String?
 
+    /// For a Living Photo, what it was made from, so it can be made again.
+    public var livingPhoto: LivingPhotoSource?
+
     /// How the plug-in draws it.
     public var isStill: Bool { still == true }
 
@@ -93,6 +96,39 @@ public struct LibraryItem: Codable, Identifiable, Equatable, Sendable {
             self.license = license
             self.source = source
         }
+    }
+}
+
+/// What a Living Photo was made from: a smaller copy of the photo, kept in the library's media
+/// folder (the user's own photo is never changed or kept), the motion, and the loop's size, so it
+/// can be made again for another display or with other motion.
+public struct LivingPhotoSource: Codable, Equatable, Sendable {
+    /// The longest side of the kept copy. Enough for a 5K display with framing room.
+    public static let maxSide = 4096
+
+    /// File name in the media folder.
+    public var photo: String
+    /// A `LivingPhotoMotion` raw value; a name this version doesn't know is kept as it is.
+    public var motion: String
+    /// The loop's size in pixels.
+    public var width: Int
+    public var height: Int
+
+    public init(photo: String, motion: String, width: Int, height: Int) {
+        self.photo = photo
+        self.motion = motion
+        self.width = width
+        self.height = height
+    }
+
+    /// Never fails, so a damaged entry costs only the ability to make the photo again, not the
+    /// item: a missing or odd file name is refused when the index is read.
+    public init(from decoder: Decoder) throws {
+        let c = try? decoder.container(keyedBy: CodingKeys.self)
+        photo = (try? c?.decodeIfPresent(String.self, forKey: .photo)) ?? ""
+        motion = (try? c?.decodeIfPresent(String.self, forKey: .motion)) ?? "subtle"
+        width = max(0, (try? c?.decodeIfPresent(Int.self, forKey: .width)) ?? 0)
+        height = max(0, (try? c?.decodeIfPresent(Int.self, forKey: .height)) ?? 0)
     }
 }
 
@@ -152,7 +188,11 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
         guard let raw = try? decoder.decode(LossyIndex.self, from: data) else { return nil }
         // An item naming a path instead of a file in the library folder is dropped, so a damaged
         // or tampered index cannot point Kinora at files outside the library.
-        let items = raw.items.compactMap(\.value).filter { isPlainFileName($0.media) && isPlainFileName($0.thumbnail) }
+        let items = raw.items.compactMap(\.value).filter { isPlainFileName($0.media) && isPlainFileName($0.thumbnail) }.map { item in
+            var item = item
+            if let source = item.livingPhoto, !isPlainFileName(source.photo) || source.photo == item.media { item.livingPhoto = nil }
+            return item
+        }
         let known = Set(items.map(\.id)).union(KinoraOriginals.all.map(\.id))
         // Playlists keep only items that still exist, in their order, once each.
         let playlists = raw.playlists?.compactMap(\.value).map { playlist -> Playlist in

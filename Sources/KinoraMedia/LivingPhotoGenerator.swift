@@ -63,6 +63,27 @@ public enum LivingPhotoGenerator {
         }
     }
 
+    /// Writes a copy of `photo` into `folder`, at most `LivingPhotoSource.maxSide` pixels on its
+    /// longest side and upright, so the Living Photo can be made again later without the user's
+    /// file. HEIC where the Mac writes it, else JPEG. The photo itself is only read.
+    public static func keepSource(of photo: URL, in folder: URL) throws -> URL {
+        guard let source = CGImageSourceCreateWithURL(photo as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: LivingPhotoSource.maxSide,
+              ] as CFDictionary)
+        else { throw LivingPhotoError.unreadablePhoto }
+        for (type, ext) in [(UTType.heic, "heic"), (UTType.jpeg, "jpg")] {
+            let url = folder.appendingPathComponent("photo.\(ext)")
+            guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else { continue }
+            CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+            if CGImageDestinationFinalize(destination) { return url }
+            try? FileManager.default.removeItem(at: url)
+        }
+        throw LivingPhotoError.writeFailed("the photo's copy could not be written")
+    }
+
     /// A still of the loop's first frame, at most 1280 pixels wide.
     static func writeThumbnail(_ renderer: LivingPhotoRenderer, to url: URL) throws {
         guard let image = renderer.image(at: 0, width: 1280),

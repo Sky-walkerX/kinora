@@ -56,6 +56,10 @@ struct Inspector: View {
                 }
             }
 
+            if let item, item.kind == .livingPhoto {
+                LivingPhotoRemakeSection(item: item).id(item.id)
+            }
+
             if wallpaper.followsSelection, let rules = wallpaper.selection?.rules {
                 variants(rules)
             } else if let current = wallpaper.currentItem {
@@ -238,6 +242,60 @@ struct WallpaperChoices: View {
                 if optional { Text(original.name).tag(UUID?.some(original.id)) } else { Text(original.name).tag(original.id) }
             }
         }
+    }
+}
+
+/// Makes a Living Photo again, with other motion or for a display of another size, from the
+/// copy of its photo Kinora keeps.
+struct LivingPhotoRemakeSection: View {
+    @Environment(LibraryModel.self) private var library
+    let item: LibraryItem
+    @State private var maker = LivingPhotoMaker()
+    @State private var motion: LivingPhotoMotion = .subtle
+
+    var body: some View {
+        if let source = item.livingPhoto {
+            let display = VideoOptimizer.largestDisplayPixels()
+            let size = LivingPhotoSource.loopSize(for: display)
+            let needsRemaking = source.needsRemaking(for: display)
+            Section {
+                Picker("Motion", selection: $motion) {
+                    ForEach(LivingPhotoMotion.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                switch maker.phase {
+                case .generating(let done):
+                    HStack {
+                        ProgressView(value: done).accessibilityLabel("Making the Living Photo again")
+                        Button("Stop") { maker.cancel() }
+                    }
+                case .failed(let message):
+                    Text(message).foregroundStyle(.secondary)
+                    remakeButton(display: display, enabled: true)
+                default:
+                    remakeButton(display: display, enabled: needsRemaking || motion != source.motionStrength)
+                }
+            } header: {
+                Text("Living Photo")
+            } footer: {
+                if needsRemaking {
+                    Text("Made at \(source.width)×\(source.height). Your largest display needs \(Int(size.width))×\(Int(size.height)); make it again to fit.")
+                } else {
+                    Text("Made at \(source.width)×\(source.height) from a smaller copy of your photo, which Kinora keeps with it. Your photo itself is never changed.")
+                }
+            }
+            .onAppear { motion = source.motionStrength }
+        } else {
+            Section("Living Photo") {
+                Text("Made before Kinora kept a copy of the photo. To change its motion or size, make it again from the photo in Living Photos.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func remakeButton(display: CGSize, enabled: Bool) -> some View {
+        Button("Make Again") { maker.remake(item, into: library, display: display, motion: motion) }
+            .disabled(!enabled)
+            .help("Make this Living Photo again with this motion, at your display's size")
     }
 }
 

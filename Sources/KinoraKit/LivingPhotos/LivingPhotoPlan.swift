@@ -6,6 +6,22 @@ import Foundation
 
 /// How much a Living Photo moves. `subtle` is the motion the spike settled on after the owner
 /// asked for less (docs/spikes/2026-11-12-living-photos-spike.md, round 2).
+extension LivingPhotoSource {
+    /// The size of the loop Kinora makes for `display`.
+    public static func loopSize(for display: CGSize) -> CGSize {
+        VideoOptimization.targetSize(source: display, display: display)
+    }
+
+    /// True when a loop made now for `display` would have another size, such as after moving
+    /// to a larger display.
+    public func needsRemaking(for display: CGSize) -> Bool {
+        let size = Self.loopSize(for: display)
+        return Int(size.width) != width || Int(size.height) != height
+    }
+
+    public var motionStrength: LivingPhotoMotion { LivingPhotoMotion(rawValue: motion) ?? .subtle }
+}
+
 public enum LivingPhotoMotion: String, Codable, CaseIterable, Sendable {
     case gentle, subtle, lively
 

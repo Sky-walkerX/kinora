@@ -50,7 +50,7 @@ jobs:
         run: swift test -c release -Xswiftc -enable-testing --filter benchmark 2>&1 | grep -E "BENCH|passed|failed|error" || true
 
       # Last, so the end of the log shows them: what this Mac's AVFoundation opens
-      # (ContainerProbeTests) and the test totals.
+      # (ContainerProbeTests), the WebM and MKV conversions (MatroskaConverterTests) and the test totals.
       - name: Summary
         if: always()
-        run: grep -E "PROBE|Test run with|Executed [0-9]+ test" "$RUNNER_TEMP/test.log" || true
+        run: grep -E "PROBE|MKV|Test run with|Executed [0-9]+ test" "$RUNNER_TEMP/test.log" || true

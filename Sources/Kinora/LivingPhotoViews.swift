@@ -82,7 +82,10 @@ import UniformTypeIdentifiers
                         if case .generating = self?.phase { self?.phase = .generating(value) }
                     }
                 }
-                let item = try library.addLivingPhoto(result, named: photo.deletingPathExtension().lastPathComponent, motion: motion)
+                // A smaller copy of the photo, so it can be made again for another display.
+                let kept = try? LivingPhotoGenerator.keepSource(of: photo, in: workFolder)
+                let item = try library.addLivingPhoto(result, named: photo.deletingPathExtension().lastPathComponent, motion: motion,
+                                                      source: kept)
                 try? FileManager.default.removeItem(at: workFolder)
                 phase = .choosing
                 onDone(item)
@@ -93,6 +96,36 @@ import UniformTypeIdentifiers
                 } else {
                     phase = .failed(Self.describe(error))
                 }
+            }
+        }
+    }
+
+    /// Makes an existing Living Photo again from the copy of its photo, at the display's size and
+    /// with `motion`. The item keeps its identity, so playlists, schedules and variants keep it.
+    func remake(_ item: LibraryItem, into library: LibraryModel, display: CGSize, motion: LivingPhotoMotion,
+                onDone: @escaping (LibraryItem) -> Void = { _ in }) {
+        guard let source = item.livingPhoto else { return }
+        work?.cancel()
+        phase = .generating(0)
+        let output = LivingPhotoSource.loopSize(for: display)
+        let photo = library.location.mediaFolder.appendingPathComponent(source.photo)
+        work = Task {
+            var folder: URL?
+            do {
+                let workFolder = try library.makeWorkFolder()
+                folder = workFolder
+                let result = try await LivingPhotoGenerator.generate(photo: photo, output: output, motion: motion, workFolder: workFolder) { value in
+                    Task { @MainActor [weak self] in
+                        if case .generating = self?.phase { self?.phase = .generating(value) }
+                    }
+                }
+                let remade = try library.replaceLivingPhoto(item, with: result, motion: motion)
+                try? FileManager.default.removeItem(at: workFolder)
+                phase = .choosing
+                onDone(remade)
+            } catch {
+                if let folder { try? FileManager.default.removeItem(at: folder) }
+                phase = error as? LivingPhotoError == .cancelled || Task.isCancelled ? .choosing : .failed(Self.describe(error))
             }
         }
     }
@@ -116,14 +149,39 @@ import UniformTypeIdentifiers
 }
 
 extension LibraryModel {
-    /// Moves a finished Living Photo out of its work folder into the library.
-    func addLivingPhoto(_ result: LivingPhotoResult, named name: String, motion: LivingPhotoMotion) throws -> LibraryItem {
+    /// Moves a finished Living Photo out of its work folder into the library, with the copy of
+    /// its photo when there is one.
+    func addLivingPhoto(_ result: LivingPhotoResult, named name: String, motion: LivingPhotoMotion, source: URL?) throws -> LibraryItem {
+        let id = UUID()
+        var item = try moveLivingPhoto(result, id: id, stem: id.uuidString, name: name.isEmpty ? "Living Photo" : name)
+        if let source {
+            let kept = "\(id.uuidString)-photo.\(source.pathExtension)"
+            if (try? FileManager.default.moveItem(at: source, to: location.mediaFolder.appendingPathComponent(kept))) != nil {
+                item.livingPhoto = LivingPhotoSource(photo: kept, motion: motion.rawValue, width: Int(result.plan.output.width),
+                                                     height: Int(result.plan.output.height))
+            }
+        }
+        add(item)
+        return item
+    }
+
+    /// Puts a remade loop in place of `old`, keeping its identity, name and photo copy.
+    func replaceLivingPhoto(_ old: LibraryItem, with result: LivingPhotoResult, motion: LivingPhotoMotion) throws -> LibraryItem {
+        // Fresh file names, so nothing still showing the old loop is pointed at a half-moved file.
+        var item = try moveLivingPhoto(result, id: old.id, stem: "\(old.id.uuidString)-\(UUID().uuidString.prefix(8))", name: old.name)
+        item.addedAt = old.addedAt
+        item.livingPhoto = old.livingPhoto.map {
+            LivingPhotoSource(photo: $0.photo, motion: motion.rawValue, width: Int(result.plan.output.width), height: Int(result.plan.output.height))
+        }
+        replace(old, with: item)
+        return item
+    }
+
+    private func moveLivingPhoto(_ result: LivingPhotoResult, id: UUID, stem: String, name: String) throws -> LibraryItem {
         let fm = FileManager.default
         try fm.createDirectory(at: location.mediaFolder, withIntermediateDirectories: true)
         try fm.createDirectory(at: location.thumbnailFolder, withIntermediateDirectories: true)
-        let id = UUID()
-        var item = LibraryItem(id: id, name: name.isEmpty ? "Living Photo" : name, kind: .livingPhoto,
-                               media: "\(id.uuidString).mov", thumbnail: "\(id.uuidString).png", addedAt: Date())
+        var item = LibraryItem(id: id, name: name, kind: .livingPhoto, media: "\(stem).mov", thumbnail: "\(stem).png", addedAt: Date())
         try fm.moveItem(at: result.video, to: location.mediaFolder.appendingPathComponent(item.media))
         do {
             try fm.moveItem(at: result.thumbnail, to: location.thumbnailURL(for: item))
@@ -132,7 +190,6 @@ extension LibraryModel {
             throw error
         }
         item.storedBytes = result.bytes
-        add(item)
         return item
     }
 }

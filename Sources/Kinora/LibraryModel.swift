@@ -90,6 +90,7 @@ import UniformTypeIdentifiers
         items = index.items
         playlists = index.playlists ?? []
         if let owned = location.ownedMediaURL(for: item) { try? FileManager.default.removeItem(at: owned) }
+        if let source = item.livingPhoto { try? FileManager.default.removeItem(at: location.mediaFolder.appendingPathComponent(source.photo)) }
         try? FileManager.default.removeItem(at: location.thumbnailURL(for: item))
         save()
     }
@@ -395,6 +396,9 @@ import UniformTypeIdentifiers
         items[index] = new
         if old.media != new.media, let owned = location.ownedMediaURL(for: old) { try? FileManager.default.removeItem(at: owned) }
         if old.thumbnail != new.thumbnail { try? FileManager.default.removeItem(at: location.thumbnailURL(for: old)) }
+        if let source = old.livingPhoto, source.photo != new.livingPhoto?.photo {
+            try? FileManager.default.removeItem(at: location.mediaFolder.appendingPathComponent(source.photo))
+        }
         save()
     }
 
