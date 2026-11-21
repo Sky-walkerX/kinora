@@ -264,7 +264,7 @@ import Observation
         return candidate?.isEmpty == false ? candidate : nil
     }
 
-    private static let previousScheduleKey = "previousSchedule"
+    nonisolated private static let previousScheduleKey = "previousSchedule"
 
     nonisolated private static func loadPreviousSchedule() -> [WallpaperRules.ScheduleEntry]? {
         UserDefaults.standard.data(forKey: previousScheduleKey).flatMap { try? JSONDecoder().decode([WallpaperRules.ScheduleEntry].self, from: $0) }
