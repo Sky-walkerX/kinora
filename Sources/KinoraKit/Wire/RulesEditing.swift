@@ -31,14 +31,15 @@ extension WallpaperRules {
     }
 
     /// The rules without `id`. The desktop's wallpaper becomes `replacement`, or else another
-    /// item the rules already use. Nil when nothing would be left to show.
-    public func removing(_ id: UUID, replacement: UUID? = nil) -> WallpaperRules? {
+    /// item the rules already use. Nil when nothing would be left to show. A rotation keeps the
+    /// wallpaper it shows at `date` when that is not the one removed.
+    public func removing(_ id: UUID, replacement: UUID? = nil, at date: Date = Date()) -> WallpaperRules? {
         var rules = self
         if rules.lockScreen == id { rules.lockScreen = nil }
         if rules.dark == id { rules.dark = nil }
-        if var rotation = rules.rotation {
-            rotation.items.removeAll { $0 == id }
-            rules.rotation = rotation.items.isEmpty ? nil : rotation
+        if let rotation = rules.rotation {
+            let remaining = rotation.items.filter { $0 != id }
+            rules.rotation = remaining.isEmpty ? nil : rotation.replacingItems(remaining, at: date)
         }
         if let schedule = rules.schedule {
             let kept = schedule.filter { $0.item != id }
@@ -75,7 +76,8 @@ public enum ScheduleEditing {
     public static let minutesPerDay = 1440
 
     /// Sorted by start, minutes clamped to the day, one entry per start time (the later one in
-    /// the list wins, as it is the newer edit).
+    /// the list wins). The editor refuses to save two changes at one time, so this only tidies
+    /// schedules written elsewhere.
     public static func normalized(_ entries: [WallpaperRules.ScheduleEntry]) -> [WallpaperRules.ScheduleEntry] {
         var byStart: [Int: WallpaperRules.ScheduleEntry] = [:]
         for entry in entries {
@@ -83,6 +85,13 @@ public enum ScheduleEditing {
             byStart[minute] = WallpaperRules.ScheduleEntry(startMinute: minute, item: entry.item)
         }
         return byStart.values.sorted { $0.startMinute < $1.startMinute }
+    }
+
+    /// Start times, in minutes, that more than one entry uses.
+    public static func duplicateStarts(_ entries: [WallpaperRules.ScheduleEntry]) -> [Int] {
+        var counts: [Int: Int] = [:]
+        for entry in entries { counts[min(minutesPerDay - 1, max(0, entry.startMinute)), default: 0] += 1 }
+        return counts.filter { $0.value > 1 }.keys.sorted()
     }
 
     /// A start time for a new entry: the middle of the longest stretch without a change,

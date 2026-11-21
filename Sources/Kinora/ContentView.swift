@@ -136,7 +136,7 @@ struct Sidebar: View {
             }
             Section("Playlists") {
                 ForEach(library.playlists) { playlist in
-                    PlaylistRow(playlist: playlist, isPlaying: wallpaper.selection?.rules.rotation?.playlist == playlist.id)
+                    PlaylistRow(playlist: playlist, isPlaying: wallpaper.liveRules?.rotation?.playlist == playlist.id)
                         .tag(SidebarItem.playlist(playlist.id))
                         .contextMenu {
                             Button("Rename…") { newName = playlist.name; renaming = playlist }

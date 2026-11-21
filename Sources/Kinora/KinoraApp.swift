@@ -92,7 +92,7 @@ struct KinoraApp: App {
                     .keyboardShortcut("p", modifiers: [.command, .option])
                 Button("Next Wallpaper") { Task { await models.wallpaper.next() } }
                     .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                    .disabled(models.wallpaper.selection?.rules.rotation == nil)
+                    .disabled(models.wallpaper.liveRules?.rotation == nil)
             }
             CommandGroup(after: .help) {
                 Button("Show Welcome") { onboarding = true }

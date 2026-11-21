@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Kinora Contributors
 
 import AVFoundation
+import CryptoKit
 import Foundation
 import ImageIO
 import KinoraKit
@@ -179,9 +180,23 @@ import UniformTypeIdentifiers
     // MARK: - Storage
 
     private func load() {
-        guard let data = try? Data(contentsOf: location.index), let index = LibraryIndex.decode(data) else { return }
+        guard let data = try? Data(contentsOf: location.index) else { return }
+        // The next save would write over whatever this Kinora can't read, so keep a copy first.
+        if LibraryIndex.decodingLosesData(data) { keepCopy(of: data) }
+        guard let index = LibraryIndex.decode(data) else {
+            lastError = "Kinora couldn't read its list of wallpapers, so it starts with an empty one. A copy of the old list is in Kinora's Backups folder."
+            return
+        }
         items = index.items
         playlists = index.playlists ?? []
+    }
+
+    /// Saves `data` in the backups folder, once per distinct content.
+    private func keepCopy(of data: Data) {
+        let digest = SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
+        let url = location.backupFolder.appendingPathComponent("library-\(digest).json")
+        try? FileManager.default.createDirectory(at: location.backupFolder, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: url.path) { try? data.write(to: url, options: .withoutOverwriting) }
     }
 
     private func save() {

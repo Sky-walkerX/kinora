@@ -51,11 +51,49 @@ public struct WallpaperRules: Codable, Equatable, Sendable {
             guard !items.isEmpty else { return nil }
             let count = items.count
             guard shuffle == true, count > 1 else { return items[step % count] }
+            // Two items can only alternate without repeating; shuffling just picks which goes first.
+            if count == 2 { return Self.shuffled(items, pass: 0, seed: since)[step % 2] }
             let pass = step / count
             var order = Self.shuffled(items, pass: pass, seed: since)
-            // A new pass never starts with the item the previous pass ended on.
+            // A new pass never starts with the item the previous pass ended on. The swap touches
+            // only the first two places, so with three or more items the previous pass's last
+            // item is the same before and after its own swap.
             if pass > 0, order.first == Self.shuffled(items, pass: pass - 1, seed: since).last { order.swapAt(0, 1) }
             return order[step % count]
+        }
+
+        /// The rotation with new items, keeping the wallpaper on screen when it is still in the
+        /// list, else moving to the one that would have come next. A timed rotation is started
+        /// again from `date` for that; one that steps on each unlock keeps its place, as only the
+        /// plug-in counts unlocks.
+        public func replacingItems(_ newItems: [UUID], at date: Date) -> Rotation {
+            changing(items: newItems, at: date)
+        }
+
+        /// The rotation with new items, order or pace, keeping the wallpaper on screen as
+        /// `replacingItems` does. A rotation that steps on unlock keeps its place when only its
+        /// items change, and otherwise starts again from its first item.
+        public func changing(items newItems: [UUID]? = nil, shuffle newShuffle: Bool? = nil, interval newInterval: TimeInterval? = nil,
+                             at date: Date) -> Rotation {
+            var rotation = self
+            if let newItems { rotation.items = newItems }
+            if let newShuffle { rotation.shuffle = newShuffle ? true : nil }
+            if let newInterval { rotation.interval = newInterval }
+            guard rotation != self, !rotation.items.isEmpty, !items.isEmpty else { return rotation }
+            let onlyItems = rotation.shuffle == shuffle && rotation.interval == interval
+            if interval <= 0, onlyItems { return rotation }
+            // Selections store whole seconds, so the anchor must be one for every process to agree.
+            rotation.since = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
+            rotation.offset = nil
+            guard interval > 0 else { return rotation }
+            let current = step(at: date, unlockCount: 0)
+            let kept = Set(rotation.items)
+            // The item on screen, else the first of the items after it that survives.
+            let target = (0..<items.count).lazy.compactMap { item(atStep: current + $0) }.first(where: kept.contains) ?? rotation.items[0]
+            if let index = (0..<rotation.items.count).first(where: { rotation.item(atStep: $0) == target }), index > 0 {
+                rotation.offset = index
+            }
+            return rotation
         }
 
         /// A permutation every process computes the same way. Swift's own hashing is seeded per

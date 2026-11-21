@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Kinora Contributors
 
 import KinoraKit
+import KinoraRender
 import SwiftUI
 
 /// One playlist: its wallpapers, and playing it on the desktop.
@@ -40,6 +41,13 @@ struct PlaylistPage: View {
                 .sheet(isPresented: $editing) {
                     PlaylistEditor(playlist: playlist)
                 }
+                // The toggle shows how the playlist is playing, when it is.
+                .onAppear { shuffle = wallpaper.playingRotation(of: playlistID)?.shuffle == true }
+                .onChange(of: wallpaper.playingRotation(of: playlistID).map { $0.shuffle == true }) { _, playing in
+                    if let playing { shuffle = playing }
+                }
+                // Changing it while the playlist plays reorders it from the wallpaper on screen.
+                .onChange(of: shuffle) { _, on in Task { await wallpaper.setShuffle(on, playlist: playlistID) } }
         } else {
             ContentUnavailableView("No Playlist", systemImage: "music.note.list")
         }
@@ -77,7 +85,7 @@ struct PlaylistEditor: View {
                 TextField("Name", text: $name)
                 Section {
                     List {
-                        ForEach(library.items) { item in
+                        ForEach(choices) { item in
                             Toggle(isOn: binding(for: item.id)) {
                                 HStack(spacing: 10) {
                                     Thumbnail(url: library.thumbnailURL(item))
@@ -115,6 +123,12 @@ struct PlaylistEditor: View {
             chosen = playlist.items
             name = playlist.name
         }
+    }
+
+    /// The library, then Kinora's originals, which playlists can hold too.
+    private var choices: [LibraryItem] {
+        let originals = OriginalRenderer.shared == nil ? KinoraOriginals.all.filter { chosen.contains($0.id) } : KinoraOriginals.all
+        return library.items + originals.map(\.libraryItem)
     }
 
     private func binding(for id: UUID) -> Binding<Bool> {

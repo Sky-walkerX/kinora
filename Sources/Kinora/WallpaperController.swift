@@ -20,6 +20,12 @@ import Observation
     private(set) var selection: KinoraSelection?
     /// True when macOS's current choice follows the live selection, so changes apply without a restart.
     private(set) var followsSelection = false
+    /// The live selection's rules while macOS shows them. Nil while another wallpaper is showing:
+    /// `selection.json` then only remembers what Kinora showed last, and nothing should act on it
+    /// as if it were on screen.
+    var liveRules: WallpaperRules? { followsSelection ? selection?.rules : nil }
+    /// The last time-of-day schedule Kinora replaced, so the schedule editor can bring it back.
+    private(set) var previousSchedule: [WallpaperRules.ScheduleEntry]? = WallpaperController.loadPreviousSchedule()
     /// True when another app or System Settings replaced Kinora. Kinora does not fight it.
     private(set) var replacedByOther = false
     private(set) var canRestore = false
@@ -117,7 +123,8 @@ import Observation
     }
 
     func use(itemID: UUID) async {
-        // A new wallpaper keeps the Lock Screen and dark variants but ends any rotation or schedule.
+        // A new wallpaper keeps the Lock Screen and dark variants but ends any rotation or schedule
+        // (the schedule editor can bring the schedule back).
         var rules = selection?.rules ?? WallpaperRules(wallpaper: itemID)
         rules.wallpaper = itemID
         rules.rotation = nil
@@ -131,32 +138,51 @@ import Observation
     }
 
     /// Plays a playlist on the desktop, changing every `interval` seconds (zero: on every unlock).
+    /// When it is already playing, the new pace or order starts from the wallpaper on screen.
     func play(_ playlist: Playlist, every interval: TimeInterval, shuffle: Bool) async {
         guard let first = playlist.items.first else { return }
         var rules = editableRules(fallback: first)
         rules.schedule = nil
-        rules.wallpaper = first
-        rules.rotation = WallpaperRules.Rotation(items: playlist.items, interval: interval, since: Date(), playlist: playlist.id, shuffle: shuffle)
-        await apply(rules)
-    }
-
-    /// Keeps a playing rotation in step with its playlist after the playlist changed.
-    func playlistChanged(_ playlist: Playlist) async {
-        guard var rules = selection?.rules, var rotation = rules.rotation, rotation.playlist == playlist.id,
-              rotation.items != playlist.items else { return }
-        if playlist.items.isEmpty {
-            rules.rotation = nil
+        if let playing = liveRules?.rotation, playing.playlist == playlist.id {
+            rules.rotation = playing.changing(items: playlist.items, shuffle: shuffle, interval: interval, at: Date())
         } else {
-            rotation.items = playlist.items
-            rules.rotation = rotation
-            if !playlist.items.contains(rules.wallpaper), let first = playlist.items.first { rules.wallpaper = first }
+            rules.wallpaper = first
+            rules.rotation = WallpaperRules.Rotation(items: playlist.items, interval: interval, since: Date(), playlist: playlist.id, shuffle: shuffle)
         }
         await apply(rules)
     }
 
-    /// Moves a rotation on to its next wallpaper.
+    /// The playlist's rotation, when it is the one on the desktop.
+    func playingRotation(of playlistID: UUID) -> WallpaperRules.Rotation? {
+        liveRules?.rotation.flatMap { $0.playlist == playlistID ? $0 : nil }
+    }
+
+    /// Shuffles or unshuffles a playlist that is playing, keeping the wallpaper on screen.
+    func setShuffle(_ shuffle: Bool, playlist playlistID: UUID) async {
+        guard var rules = liveRules, let rotation = rules.rotation, rotation.playlist == playlistID,
+              (rotation.shuffle == true) != shuffle else { return }
+        rules.rotation = rotation.changing(shuffle: shuffle, at: Date())
+        await apply(rules)
+    }
+
+    /// Keeps a playing rotation in step with its playlist after the playlist changed, keeping the
+    /// wallpaper on screen where it can. While another wallpaper is showing, Kinora's remembered
+    /// rules are updated quietly and the desktop is left alone.
+    func playlistChanged(_ playlist: Playlist) async {
+        guard var rules = selection?.rules, let rotation = rules.rotation, rotation.playlist == playlist.id,
+              rotation.items != playlist.items else { return }
+        if playlist.items.isEmpty {
+            rules.rotation = nil
+        } else {
+            rules.rotation = rotation.replacingItems(playlist.items, at: Date())
+            if !playlist.items.contains(rules.wallpaper), let first = playlist.items.first { rules.wallpaper = first }
+        }
+        await apply(rules, activating: false)
+    }
+
+    /// Moves a rotation on to its next wallpaper. Only while Kinora is the wallpaper.
     func next() async {
-        guard let rules = selection?.rules, rules.rotation != nil else { return }
+        guard let rules = liveRules, rules.rotation != nil else { return }
         await apply(rules.advanced())
     }
 
@@ -165,17 +191,18 @@ import Observation
         await apply(editableRules(fallback: fallback).scheduled(entries))
     }
 
-    /// Where Kinora's rules use an item.
+    /// Where Kinora's rules on screen use an item.
     func uses(of id: UUID) -> [RuleUse] {
-        selection?.rules.uses(of: id) ?? []
+        liveRules?.uses(of: id) ?? []
     }
 
     /// Takes an item out of the live selection before it leaves the library. Returns false when
-    /// it is the only thing Kinora shows, so removing it would leave the wallpaper empty.
+    /// it is the only thing Kinora shows, so removing it would leave the wallpaper empty. While
+    /// another wallpaper is showing, the remembered rules are tidied without touching the desktop.
     func forget(_ id: UUID, replacement: UUID?) async -> Bool {
         guard let rules = selection?.rules, !rules.uses(of: id).isEmpty else { return true }
-        guard let edited = rules.removing(id, replacement: replacement) else { return !followsSelection }
-        await apply(edited)
+        guard let edited = rules.removing(id, replacement: replacement, at: Date()) else { return !followsSelection }
+        await apply(edited, activating: false)
         return true
     }
 
@@ -188,7 +215,7 @@ import Observation
         // Only the plug-in counts unlocks; the app works out the rest.
         return SurfaceResolution.resolve(configuration: configuration, selection: selection, mode: mode,
                                          appearance: dark ? .dark : .light, at: now, unlockCount: 0,
-                                         library: library?.items.map(\.id) ?? [],
+                                         library: library.map { location.showableItemIDs($0.items) } ?? [],
                                          originalsAvailable: OriginalRenderer.shared != nil)
     }
 
@@ -200,15 +227,20 @@ import Observation
     }
 
     /// Changes the live selection. When macOS's choice already follows Kinora, the plug-in picks
-    /// it up at once; otherwise Kinora becomes the wallpaper, which restarts WallpaperAgent once.
-    func apply(_ rules: WallpaperRules) async {
+    /// it up at once; otherwise, when `activating`, Kinora becomes the wallpaper, which restarts
+    /// WallpaperAgent once. Housekeeping (a removed item, an edited playlist) passes false, so it
+    /// never takes the desktop back from the wallpaper the user chose instead.
+    func apply(_ rules: WallpaperRules, activating: Bool = true) async {
         working = true
         defer { working = false }
         do {
             try FileManager.default.createDirectory(at: location.root, withIntermediateDirectories: true)
+            if let old = selection?.rules.schedule, !old.isEmpty, rules.schedule?.isEmpty ?? true, old != previousSchedule {
+                rememberSchedule(old)
+            }
             try KinoraSelection(rules: rules).encoded().write(to: location.selection, options: .atomic)
             LibraryModel.postLibraryChanged()
-            if !followsSelection {
+            if !followsSelection, activating {
                 if plugIn != .enabled { await repairPlugIn() }
                 guard plugIn == .enabled else {
                     lastError = "macOS has Kinora's wallpaper plug-in switched off, so it can't show wallpapers yet."
@@ -222,6 +254,25 @@ import Observation
             lastError = Self.describe(error)
         }
         refresh()
+    }
+
+    /// A schedule the editor can offer to bring back: the one Kinora last replaced, or the one
+    /// Kinora showed before another wallpaper took over. Nil while a schedule is in force.
+    var restorableSchedule: [WallpaperRules.ScheduleEntry]? {
+        guard liveRules?.schedule?.isEmpty ?? true else { return nil }
+        let candidate = previousSchedule ?? (followsSelection ? nil : selection?.rules.schedule)
+        return candidate?.isEmpty == false ? candidate : nil
+    }
+
+    private static let previousScheduleKey = "previousSchedule"
+
+    nonisolated private static func loadPreviousSchedule() -> [WallpaperRules.ScheduleEntry]? {
+        UserDefaults.standard.data(forKey: previousScheduleKey).flatMap { try? JSONDecoder().decode([WallpaperRules.ScheduleEntry].self, from: $0) }
+    }
+
+    private func rememberSchedule(_ entries: [WallpaperRules.ScheduleEntry]) {
+        previousSchedule = entries
+        if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: Self.previousScheduleKey) }
     }
 
     /// Edits the live selection's rules in place, for variants and rotations.

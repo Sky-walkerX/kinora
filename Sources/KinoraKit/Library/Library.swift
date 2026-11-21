@@ -166,6 +166,17 @@ public struct LibraryIndex: Codable, Equatable, Sendable {
         return index
     }
 
+    /// True when reading `data` would lose something on the next save: an index that doesn't
+    /// decode at all, one from a newer Kinora, or items or playlists that are skipped. The app
+    /// keeps a copy of such a file before it writes over it.
+    public static func decodingLosesData(_ data: Data) -> Bool {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let raw = try? decoder.decode(LossyIndex.self, from: data), let index = decode(data) else { return true }
+        return raw.version > currentVersion || index.items.count < raw.items.count
+            || (raw.playlists?.contains { $0.value == nil } ?? false)
+    }
+
     private struct LossyIndex: Decodable {
         var version: Int
         var items: [Lossy<LibraryItem>]
@@ -214,6 +225,14 @@ public struct LibraryLocation: Equatable, Sendable {
     public func mediaURL(for item: LibraryItem, home: URL = realHomeDirectory()) -> URL {
         if item.kind == .appleAerial { return AppleAerials.videoURL(fileName: item.media, home: home) }
         return mediaFolder.appendingPathComponent(item.media)
+    }
+
+    /// The items that can be shown: all of them except Apple aerials whose video macOS has
+    /// since deleted to free space. Those would otherwise sit on their thumbnail forever; left
+    /// out, the surface falls back as it does for a removed item.
+    public func showableItemIDs(_ items: [LibraryItem], home: URL = realHomeDirectory(),
+                                fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> [UUID] {
+        items.filter { $0.kind != .appleAerial || fileExists(mediaURL(for: $0, home: home)) }.map(\.id)
     }
 
     /// The item's media when Kinora owns it and may delete it; nil for media it only points at.

@@ -171,7 +171,7 @@ private let unlockCounterKey = "unlockCounter"
         let metal = OriginalRenderer.shared != nil
         let resolution = SurfaceResolution.resolve(configuration: record.configuration, selection: selection,
                                                    mode: record.presentation, appearance: record.appearance, at: Date(),
-                                                   unlockCount: unlocks.count, library: library.items.map(\.id),
+                                                   unlockCount: unlocks.count, library: location.showableItemIDs(library.items),
                                                    originalsAvailable: metal)
         // An item deleted from the library falls back to another one the rules name, then
         // Kinora's own selection, then any item, so the surface never goes blank.

@@ -16,7 +16,7 @@ struct MenuBarView: View {
     var body: some View {
         Button(settings.playback.paused ? "Resume Wallpapers" : "Pause Wallpapers") { KinoraCommands.togglePause() }
         Button("Next Wallpaper") { Task { await KinoraCommands.next() } }
-            .disabled(wallpaper.selection?.rules.rotation == nil)
+            .disabled(wallpaper.liveRules?.rotation == nil)
         Divider()
         Text(costLine)
         if let shown = wallpaper.shownItem(dark: colorScheme == .dark).flatMap({ library.item($0) }) {

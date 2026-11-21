@@ -45,7 +45,13 @@ struct ScheduleEditor: View {
                 } header: {
                     Text("Time of Day")
                 } footer: {
-                    Text("The schedule decides the desktop over a rotation or Dark Mode. Your Lock Screen choice is not affected.")
+                    if duplicates.isEmpty {
+                        Text("The schedule decides the desktop over a rotation or Dark Mode. Your Lock Screen choice is not affected.")
+                    } else {
+                        Label("Two changes start at \(duplicates.map(Self.timeText).formatted()). Move or remove one to save.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
                 }
                 Section {
                     HStack {
@@ -54,6 +60,10 @@ struct ScheduleEditor: View {
                         Button("Day and Night") { dayAndNight() }
                             .disabled(library.items.count < 2)
                             .help("One wallpaper from 7:00 and another from 19:00")
+                        if rows.isEmpty, let previous = restorable {
+                            Button("Restore Previous") { rows = previous.map { Row(minute: $0.startMinute, item: $0.item) } }
+                                .help("Bring back the schedule you had before")
+                        }
                         Spacer()
                         Button("Turn Off", role: .destructive) { rows.removeAll() }
                             .disabled(rows.isEmpty)
@@ -67,6 +77,7 @@ struct ScheduleEditor: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Save") { save() }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(!duplicates.isEmpty)
             }
             .padding()
         }
@@ -75,9 +86,18 @@ struct ScheduleEditor: View {
     }
 
     private func load() {
-        let entries = wallpaper.selection?.rules.schedule ?? []
+        let entries = wallpaper.liveRules?.schedule ?? []
         rows = entries.map { Row(minute: $0.startMinute, item: $0.item) }.filter { library.item($0.item) != nil }
     }
+
+    /// A schedule Kinora replaced, still made of wallpapers in the library.
+    private var restorable: [WallpaperRules.ScheduleEntry]? {
+        let kept = wallpaper.restorableSchedule?.filter { library.item($0.item) != nil } ?? []
+        return kept.isEmpty ? nil : kept
+    }
+
+    /// Start times two rows share. Saving would keep only one of them, so it waits until they differ.
+    private var duplicates: [Int] { ScheduleEditing.duplicateStarts(entries) }
 
     private var entries: [WallpaperRules.ScheduleEntry] {
         rows.map { WallpaperRules.ScheduleEntry(startMinute: $0.minute, item: $0.item) }
@@ -92,12 +112,13 @@ struct ScheduleEditor: View {
 
     private func dayAndNight() {
         guard library.items.count >= 2 else { return }
-        let day = wallpaper.selection?.rules.wallpaper ?? library.items[0].id
-        let night = wallpaper.selection?.rules.dark ?? library.items.first { $0.id != day }?.id ?? library.items[1].id
+        let day = wallpaper.liveRules?.wallpaper ?? library.items[0].id
+        let night = wallpaper.liveRules?.dark ?? library.items.first { $0.id != day }?.id ?? library.items[1].id
         rows = ScheduleEditing.dayAndNight(day: day, night: night).map { Row(minute: $0.startMinute, item: $0.item) }
     }
 
     private func save() {
+        guard duplicates.isEmpty else { return }
         Task { await wallpaper.setSchedule(entries, fallback: fallback) }
         dismiss()
     }
@@ -105,18 +126,22 @@ struct ScheduleEditor: View {
     /// The row's minutes after midnight, as a time today for the picker.
     private func time(for row: Binding<Row>) -> Binding<Date> {
         Binding(get: {
-            Calendar.current.startOfDay(for: Date()).addingTimeInterval(TimeInterval(row.wrappedValue.minute * 60))
+            Self.date(atMinute: row.wrappedValue.minute)
         }, set: { date in
             let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
             row.wrappedValue.minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
         })
     }
-}
 
-extension WallpaperRules.ScheduleEntry {
+    /// Today at a wall-clock time. Built from the hour and minute, not by adding seconds to
+    /// midnight, which is an hour off on days the clocks change.
+    static func date(atMinute minute: Int, calendar: Calendar = .current, on day: Date = Date()) -> Date {
+        calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: day)
+            ?? calendar.startOfDay(for: day).addingTimeInterval(TimeInterval(minute * 60))
+    }
+
     /// "07:00", in the user's clock style.
-    var timeText: String {
-        let date = Calendar.current.startOfDay(for: Date()).addingTimeInterval(TimeInterval(startMinute * 60))
-        return date.formatted(date: .omitted, time: .shortened)
+    static func timeText(_ minute: Int) -> String {
+        date(atMinute: minute).formatted(date: .omitted, time: .shortened)
     }
 }
