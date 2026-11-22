@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 The Kinora Contributors -->
+<!-- A page that counts its own animation: requestAnimationFrame frames, a CSS animation's
+     time and a 100 ms timer. WebProbe reads probe() twice and compares. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #10243a; }
+  #box { position: absolute; left: 0; top: 40px; width: 160px; height: 160px;
+         background: linear-gradient(135deg, #ff8a00, #00a6ff); animation: move 1.5s linear infinite alternate; }
+  @keyframes move { from { transform: translateX(0); } to { transform: translateX(300px); } }
+  canvas { position: absolute; right: 0; bottom: 0; }
+</style>
+</head>
+<body>
+<div id="box"></div>
+<canvas id="c" width="160" height="120"></canvas>
+<script>
+  let frames = 0, ticks = 0;
+  const ctx = document.getElementById("c").getContext("2d");
+  function draw(t) {
+    frames++;
+    ctx.fillStyle = "hsl(" + ((t / 8) % 360) + ", 80%, 55%)";
+    ctx.fillRect(0, 0, 160, 120);
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+  setInterval(() => { ticks++; }, 100);
+  function probe() {
+    const animation = document.getAnimations()[0];
+    return JSON.stringify({ frames, ticks, css: animation ? Number(animation.currentTime) : -1,
+                            visibility: document.visibilityState, now: performance.now() });
+  }
+</script>
+</body>
+</html>

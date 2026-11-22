@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 The Kinora Contributors
+
+# The WebKit-in-plug-in spike's sandbox half (docs/spikes/2026-11-22-webkit-probe): does a
+# WKWebView signed with the wallpaper plug-in's entitlements load and animate a local page, and
+# can its pixels be re-hosted through a remote CAContext? GitHub's virtual Mac has no
+# WallpaperAgent session to test the rest; see the spike notes for what still needs a real Mac.
+
+name: WebKit probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'docs/spikes/2026-11-22-webkit-probe/**'
+      - 'Resources/Wallpaper/KinoraWallpaper.entitlements'
+      - '.github/workflows/webkit-probe.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webkit-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Probe WebKit in the plug-in's sandbox
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Run the probe
+        run: docs/spikes/2026-11-22-webkit-probe/run.sh "$RUNNER_TEMP/webprobe"
+
+      - name: Summary
+        if: always()
+        run: |
+          python3 -I - "$RUNNER_TEMP/webprobe/results.jsonl" <<'PY'
+          import json, sys
+          keys = ["loaded", "windowVisible", "occlusionVisible", "visibilityState", "rafPerSecond", "timerPerSecond",
+                  "cssMsPerSecond", "snapshotFlat", "snapshotChange", "method", "hostedFlat", "hostedMeanLuma",
+                  "hostedChange", "webContentTerminated", "loadError", "javascript", "occlusionSwitch"]
+          for line in open(sys.argv[1]):
+              row = json.loads(line)
+              if row.get("event") == "scenario":
+                  print("SUMMARY", row["variant"], row["name"], " ".join(f"{k}={row[k]}" for k in keys if k in row))
+              elif row.get("event") in ("start", "timeout"):
+                  print("SUMMARY", row["variant"], json.dumps(row, sort_keys=True))
+          PY
+          for f in "$RUNNER_TEMP"/webprobe/*.log; do echo "== $f"; head -40 "$f"; done
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: webkit-probe
+          path: |
+            ${{ runner.temp }}/webprobe/results.jsonl
+            ${{ runner.temp }}/webprobe/*.log
+            ${{ runner.temp }}/webprobe/*.stderr
+          retention-days: 14
+          if-no-files-found: warn
