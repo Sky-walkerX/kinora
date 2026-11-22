@@ -29,9 +29,10 @@ public struct ChoiceConfiguration: Codable, Equatable, Sendable {
 
     public var follows: Bool { followsKinora == true }
 
-    /// The rules to apply: Kinora's selection when following it, else this choice's own fields.
-    public func rules(selection: KinoraSelection?) -> WallpaperRules {
-        if follows, let selection { return selection.rules }
+    /// The rules to apply: Kinora's selection when following it, with `display`'s own choice
+    /// when it has one, else this choice's own fields.
+    public func rules(selection: KinoraSelection?, display: String? = nil) -> WallpaperRules {
+        if follows, let selection { return selection.rules(forDisplay: display) }
         return WallpaperRules(wallpaper: wallpaper, lockScreen: lockScreen)
     }
 

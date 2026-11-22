@@ -5,7 +5,7 @@ import Foundation
 
 /// A place in the rules where a library item is used, for telling the user what removing it changes.
 public enum RuleUse: String, CaseIterable, Sendable {
-    case desktop, lockScreen, dark, rotation, schedule
+    case desktop, lockScreen, dark, rotation, schedule, display
 
     public var description: String {
         switch self {
@@ -14,6 +14,7 @@ public enum RuleUse: String, CaseIterable, Sendable {
         case .dark: "your Dark Mode wallpaper"
         case .rotation: "the rotation"
         case .schedule: "the time-of-day schedule"
+        case .display: "a display's own wallpaper"
         }
     }
 }

@@ -96,11 +96,12 @@ public struct SurfaceResolution: Equatable, Sendable {
     ///   - selection: Kinora's live selection.
     ///   - library: the library's items, in order.
     ///   - originalsAvailable: whether Kinora's originals can be drawn (they need Metal).
+    ///   - display: the surface's display, as `DisplayChoice.key(for:)` names it, when known.
     public static func resolve(configuration: ChoiceConfiguration?, selection: KinoraSelection?,
                                mode: PresentationMode, appearance: SystemAppearance, at date: Date,
                                calendar: Calendar = .current, unlockCount: Int,
-                               library: [UUID], originalsAvailable: Bool) -> SurfaceResolution {
-        let rules = configuration?.rules(selection: selection) ?? selection?.rules
+                               library: [UUID], originalsAvailable: Bool, display: String? = nil) -> SurfaceResolution {
+        let rules = configuration?.rules(selection: selection, display: display) ?? selection?.rules(forDisplay: display)
         let wanted = rules?.item(for: mode, appearance: appearance, at: date, calendar: calendar, unlockCount: unlockCount)
         var fallbacks: [UUID] = []
         if let main = selection?.rules.wallpaper { fallbacks.append(main) }

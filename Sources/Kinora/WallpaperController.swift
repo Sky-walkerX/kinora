@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 The Kinora Contributors
 
+import AppKit
 import Foundation
 import KinoraKit
 import KinoraRender
@@ -40,6 +41,9 @@ import Observation
     private var clockTimer: Timer?
     /// The library, for working out what the plug-in falls back to when an item is gone.
     weak var library: LibraryModel?
+    /// The displays connected now, for giving one a wallpaper of its own.
+    private(set) var displays: [ConnectedDisplay] = ConnectedDisplay.all()
+    private var screenObserver: NSObjectProtocol?
 
     private let store = WallpaperStoreFiles.current()
     private let location = LibraryLocation.current
@@ -54,6 +58,10 @@ import Observation
         guard folderWatcher == nil else { return }
         folderWatcher = watch(store.storeFolder, events: [.write, .rename, .delete])
         armFileWatcher()
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                                                object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.displays = ConnectedDisplay.all() }
+        }
     }
 
     private func armFileWatcher() {
@@ -123,13 +131,59 @@ import Observation
     }
 
     func use(itemID: UUID) async {
-        // A new wallpaper keeps the Lock Screen and dark variants but ends any rotation or schedule
-        // (the schedule editor can bring the schedule back).
+        // A new wallpaper keeps the Lock Screen and dark variants, and displays with a wallpaper
+        // of their own, but ends any rotation or schedule (the schedule editor can bring the
+        // schedule back).
         var rules = selection?.rules ?? WallpaperRules(wallpaper: itemID)
         rules.wallpaper = itemID
         rules.rotation = nil
         rules.schedule = nil
         await apply(rules)
+    }
+
+    /// Shows an item on every display, ending the displays' own choices too.
+    func useEverywhere(itemID: UUID) async {
+        var rules = selection?.rules ?? WallpaperRules(wallpaper: itemID)
+        rules.wallpaper = itemID
+        rules.rotation = nil
+        rules.schedule = nil
+        await apply(selection: KinoraSelection(rules: rules))
+    }
+
+    /// Gives one display a wallpaper of its own, keeping its own Lock Screen if it had one. The
+    /// other displays keep showing the main rules. When Kinora isn't the wallpaper yet, it
+    /// becomes it on every display, showing the remembered rules (or this item) on the others.
+    func use(itemID: UUID, on display: ConnectedDisplay) async {
+        let current = selection ?? KinoraSelection(rules: WallpaperRules(wallpaper: itemID))
+        let choice = DisplayChoice(wallpaper: itemID, lockScreen: current.displays?[display.key]?.lockScreen, name: display.name)
+        await apply(selection: current.choosing(choice, forDisplay: display.key))
+    }
+
+    /// Sets a display's own Lock Screen; nil follows the main Lock Screen. Only for a display that
+    /// has a wallpaper of its own.
+    func setLockScreen(_ itemID: UUID?, on displayKey: String) async {
+        guard let current = selection, var choice = current.displays?[displayKey] else { return }
+        choice.lockScreen = itemID
+        await apply(selection: current.choosing(choice, forDisplay: displayKey))
+    }
+
+    /// Sends a display back to the main rules. Works for disconnected displays too.
+    func clearChoice(forDisplay displayKey: String) async {
+        guard let current = selection, current.displays?[displayKey] != nil else { return }
+        // Housekeeping: never takes the desktop back from another wallpaper.
+        await apply(selection: current.choosing(nil, forDisplay: displayKey), activating: false)
+    }
+
+    /// The display's own choice, while Kinora's rules are on screen.
+    func choice(forDisplay displayKey: String) -> DisplayChoice? {
+        followsSelection ? selection?.displays?[displayKey] : nil
+    }
+
+    /// Displays with a choice of their own that aren't connected now, with the name they had.
+    var disconnectedChoices: [(key: String, choice: DisplayChoice)] {
+        guard followsSelection, let displays = selection?.displays else { return [] }
+        let connected = Set(self.displays.map(\.key))
+        return displays.filter { !connected.contains($0.key) }.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
     }
 
     /// The rules to edit: the live selection when there is one, else a fresh one around `fallback`.
@@ -191,39 +245,58 @@ import Observation
         await apply(editableRules(fallback: fallback).scheduled(entries))
     }
 
-    /// Where Kinora's rules on screen use an item.
+    /// Where Kinora's rules on screen use an item, on any display.
     func uses(of id: UUID) -> [RuleUse] {
-        liveRules?.uses(of: id) ?? []
+        followsSelection ? selection?.uses(of: id) ?? [] : []
     }
 
-    /// Takes an item out of the live selection before it leaves the library. Returns false when
-    /// it is the only thing Kinora shows, so removing it would leave the wallpaper empty. While
-    /// another wallpaper is showing, the remembered rules are tidied without touching the desktop.
+    /// Takes an item out of the live selection, on every display, before it leaves the library.
+    /// Returns false when it is the only thing Kinora shows, so removing it would leave the
+    /// wallpaper empty. While another wallpaper is showing, the remembered rules are tidied
+    /// without touching the desktop.
     func forget(_ id: UUID, replacement: UUID?) async -> Bool {
-        guard let rules = selection?.rules, !rules.uses(of: id).isEmpty else { return true }
-        guard let edited = rules.removing(id, replacement: replacement, at: Date()) else { return !followsSelection }
-        await apply(edited, activating: false)
+        guard let selection, !selection.uses(of: id).isEmpty else { return true }
+        guard let edited = selection.removing(id, replacement: replacement, at: Date()) else { return !followsSelection }
+        await apply(selection: edited, activating: false)
         return true
     }
 
     /// What a surface shows right now, worked out exactly as the plug-in works it out: rotation,
     /// schedule, Dark Mode and the Lock Screen, then the plug-in's fallbacks for removed items.
     /// Nil when Kinora is not the wallpaper.
-    func shown(_ mode: PresentationMode = .default, dark: Bool, at date: Date? = nil) -> SurfaceResolution? {
+    func shown(_ mode: PresentationMode = .default, dark: Bool, at date: Date? = nil, display: String? = nil) -> SurfaceResolution? {
         guard currentItem != nil else { return nil }
         let now = max(clock, date ?? Date())
         // Only the plug-in counts unlocks; the app works out the rest.
         return SurfaceResolution.resolve(configuration: configuration, selection: selection, mode: mode,
                                          appearance: dark ? .dark : .light, at: now, unlockCount: 0,
                                          library: library.map { location.showableItemIDs($0.items) } ?? [],
-                                         originalsAvailable: OriginalRenderer.shared != nil)
+                                         originalsAvailable: OriginalRenderer.shared != nil, display: display)
     }
 
-    /// The item on the desktop right now. Nil when Kinora is not the wallpaper, or when a rotation
-    /// steps on each unlock, which only the plug-in can count.
-    func shownItem(dark: Bool, at date: Date? = nil) -> UUID? {
-        guard let resolution = shown(dark: dark, at: date), !resolution.dependsOnUnlocks else { return nil }
+    /// The item on the desktop right now, on the displays without a choice of their own (or on
+    /// `display`). Nil when Kinora is not the wallpaper, or when a rotation steps on each unlock,
+    /// which only the plug-in can count.
+    func shownItem(dark: Bool, at date: Date? = nil, display: String? = nil) -> UUID? {
+        guard let resolution = shown(dark: dark, at: date, display: display), !resolution.dependsOnUnlocks else { return nil }
         return resolution.shown
+    }
+
+    /// Every item some connected display shows on its desktop right now.
+    func shownItems(dark: Bool) -> Set<UUID> {
+        var items = Set([shownItem(dark: dark)].compactMap { $0 })
+        guard selection?.displays?.isEmpty == false else { return items }
+        for display in displays {
+            if let item = shownItem(dark: dark, display: display.key) { items.insert(item) }
+        }
+        return items
+    }
+
+    /// The connected displays showing `id` on their desktop, when that is not all of them.
+    func displaysShowing(_ id: UUID, dark: Bool) -> [ConnectedDisplay]? {
+        guard displays.count > 1, selection?.displays?.isEmpty == false else { return nil }
+        let showing = displays.filter { shownItem(dark: dark, display: $0.key) == id }
+        return showing.count == displays.count ? nil : showing
     }
 
     /// Changes the live selection. When macOS's choice already follows Kinora, the plug-in picks
@@ -231,6 +304,13 @@ import Observation
     /// WallpaperAgent once. Housekeeping (a removed item, an edited playlist) passes false, so it
     /// never takes the desktop back from the wallpaper the user chose instead.
     func apply(_ rules: WallpaperRules, activating: Bool = true) async {
+        // Displays with a wallpaper of their own keep it.
+        await apply(selection: KinoraSelection(rules: rules, displays: selection?.displays), activating: activating)
+    }
+
+    /// Writes a whole selection, the main rules and every display's own choice, as `apply`.
+    func apply(selection next: KinoraSelection, activating: Bool = true) async {
+        let rules = next.rules
         working = true
         defer { working = false }
         do {
@@ -238,7 +318,7 @@ import Observation
             if let old = selection?.rules.schedule, !old.isEmpty, rules.schedule?.isEmpty ?? true, old != previousSchedule {
                 rememberSchedule(old)
             }
-            try KinoraSelection(rules: rules).encoded().write(to: location.selection, options: .atomic)
+            try next.encoded().write(to: location.selection, options: .atomic)
             LibraryModel.postLibraryChanged()
             if !followsSelection, activating {
                 if plugIn != .enabled { await repairPlugIn() }
@@ -354,5 +434,21 @@ enum Shell {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return Result(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
+    }
+}
+
+/// A display connected now, named as macOS names it, with the lasting identity the plug-in
+/// matches its surfaces against.
+struct ConnectedDisplay: Identifiable, Equatable {
+    let key: String
+    let name: String
+    var id: String { key }
+
+    static func all() -> [ConnectedDisplay] {
+        NSScreen.screens.compactMap { screen in
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                  let key = DisplayChoice.key(for: CGDirectDisplayID(number.uint32Value)) else { return nil }
+            return ConnectedDisplay(key: key, name: screen.localizedName)
+        }
     }
 }

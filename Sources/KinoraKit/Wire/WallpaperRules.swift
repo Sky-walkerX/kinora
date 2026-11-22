@@ -184,11 +184,16 @@ public struct WallpaperRules: Codable, Equatable, Sendable {
 public struct KinoraSelection: Codable, Equatable, Sendable {
     public static let currentVersion = 1
     public var version: Int
+    /// The rules for every display without a choice of its own.
     public var rules: WallpaperRules
+    /// Displays with a wallpaper of their own, keyed by `DisplayChoice.key(for:)`. Older
+    /// plug-ins ignore the key and show `rules` everywhere, which is the safe reading.
+    public var displays: [String: DisplayChoice]?
 
-    public init(rules: WallpaperRules) {
+    public init(rules: WallpaperRules, displays: [String: DisplayChoice]? = nil) {
         self.version = Self.currentVersion
         self.rules = rules
+        self.displays = displays?.isEmpty == false ? displays : nil
     }
 
     public func encoded() throws -> Data {

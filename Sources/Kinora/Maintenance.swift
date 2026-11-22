@@ -40,6 +40,9 @@ import UniformTypeIdentifiers
         if let rules = wallpaper.selection?.rules {
             add("Rules", "lock screen \(rules.lockScreen != nil), dark \(rules.dark != nil), rotation \(rules.rotation?.items.count ?? 0) items every \(Int(rules.rotation?.interval ?? 0)) s, schedule \(rules.schedule?.count ?? 0) entries")
         }
+        let ownChoices = wallpaper.selection?.displays ?? [:]
+        let connected = Set(wallpaper.displays.map(\.key))
+        add("Displays with their own wallpaper", "\(ownChoices.count), \(ownChoices.keys.filter(connected.contains).count) connected; \(wallpaper.displays.count) displays identified")
 
         let library = models.library
         var kinds: [String: Int] = [:]

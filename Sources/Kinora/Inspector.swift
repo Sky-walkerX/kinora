@@ -43,6 +43,10 @@ struct Inspector: View {
                         Label(placement(of: item.id), systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.secondary)
                     } else {
+                        if let showing = wallpaper.displaysShowing(item.id, dark: colorScheme == .dark), !showing.isEmpty {
+                            Label("On \(ListFormatter.localizedString(byJoining: showing.map(\.name)))", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
                         Button {
                             Task { await wallpaper.use(item) }
                         } label: {
@@ -62,6 +66,9 @@ struct Inspector: View {
 
             if wallpaper.followsSelection, let rules = wallpaper.selection?.rules {
                 variants(rules)
+                if wallpaper.displays.count > 1 || !wallpaper.disconnectedChoices.isEmpty {
+                    displaysSection
+                }
             } else if let current = wallpaper.currentItem {
                 // Picked in System Settings: one wallpaper, no variants until Kinora manages it.
                 Section {
@@ -145,10 +152,61 @@ struct Inspector: View {
         .disabled(wallpaper.working)
     }
 
-    /// Where the shown item appears: the Lock Screen too, unless it has a wallpaper of its own.
+    /// Each connected display's own wallpaper and Lock Screen, or the main rules, and the
+    /// choices kept for displays that aren't connected now.
+    private var displaysSection: some View {
+        Section {
+            ForEach(wallpaper.displays) { display in
+                let choice = wallpaper.choice(forDisplay: display.key)
+                Picker(display.name, selection: Binding(get: { choice?.wallpaper }, set: { id in
+                    Task {
+                        if let id { await wallpaper.use(itemID: id, on: display) } else { await wallpaper.clearChoice(forDisplay: display.key) }
+                    }
+                })) {
+                    Text("Same as Other Displays").tag(UUID?.none)
+                    WallpaperChoices()
+                }
+                if let choice {
+                    Picker("Lock Screen", selection: Binding(get: { choice.lockScreen }, set: { id in
+                        Task { await wallpaper.setLockScreen(id, on: display.key) }
+                    })) {
+                        Text("Same as Other Displays").tag(UUID?.none)
+                        WallpaperChoices()
+                    }
+                    .padding(.leading, 14)
+                    .accessibilityLabel("\(display.name) Lock Screen")
+                }
+            }
+            ForEach(wallpaper.disconnectedChoices, id: \.key) { entry in
+                LabeledContent {
+                    HStack {
+                        Text(name(of: entry.choice.wallpaper)).foregroundStyle(.secondary)
+                        Button("Forget") { Task { await wallpaper.clearChoice(forDisplay: entry.key) } }
+                            .accessibilityLabel("Forget the wallpaper for \(entry.choice.name ?? "this display")")
+                    }
+                } label: {
+                    Text(entry.choice.name ?? "Disconnected display")
+                    Text("Not connected")
+                }
+            }
+        } header: {
+            Text("Displays")
+        } footer: {
+            Text("A display with a wallpaper of its own keeps it while the others rotate, follow the schedule or change with Dark Mode. Changes apply at once.")
+        }
+        .disabled(wallpaper.working)
+    }
+
+    /// Where the shown item appears: the Lock Screen too, unless it has a wallpaper of its own,
+    /// and only some displays when others have their own.
     private func placement(of id: UUID) -> String {
-        let lock = wallpaper.shown(.locked, dark: colorScheme == .dark)?.shown
-        return lock == id ? "On your desktop and Lock Screen" : "On your desktop"
+        let dark = colorScheme == .dark
+        let lock = wallpaper.shown(.locked, dark: dark)?.shown
+        let surfaces = lock == id ? "desktop and Lock Screen" : "desktop"
+        if let showing = wallpaper.displaysShowing(id, dark: dark), !showing.isEmpty {
+            return "On the \(surfaces) of \(ListFormatter.localizedString(byJoining: showing.map(\.name)))"
+        }
+        return "On your \(surfaces)"
     }
 
     private func scheduleSummary(_ rules: WallpaperRules) -> String {

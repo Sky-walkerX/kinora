@@ -83,11 +83,20 @@ struct LibraryGrid: View {
 
     private func tile(_ item: LibraryItem) -> some View {
         LibraryTile(item: item, thumbnail: library.thumbnailURL(item), isSelected: selection == item.id,
-                    isCurrent: wallpaper.shownItem(dark: colorScheme == .dark) == item.id)
+                    isCurrent: wallpaper.shownItems(dark: colorScheme == .dark).contains(item.id))
             .onTapGesture { selection = item.id }
             .simultaneousGesture(TapGesture(count: 2).onEnded { Task { await wallpaper.use(item) } })
             .contextMenu {
                 Button("Use as Wallpaper") { Task { await wallpaper.use(item) } }
+                if wallpaper.displays.count > 1 {
+                    Menu("Use on Display") {
+                        ForEach(wallpaper.displays) { display in
+                            Button(display.name) { Task { await wallpaper.use(itemID: item.id, on: display) } }
+                        }
+                        Divider()
+                        Button("All Displays") { Task { await wallpaper.useEverywhere(itemID: item.id) } }
+                    }
+                }
                 Menu("Add to Playlist") {
                     ForEach(library.playlists) { playlist in
                         Button(playlist.name) { addToPlaylist(item.id, playlist.id) }

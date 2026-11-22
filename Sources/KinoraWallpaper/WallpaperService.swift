@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 The Kinora Contributors
 
+import CoreGraphics
 import Foundation
 import IOSurface
 import KinoraKit
@@ -26,6 +27,8 @@ private let unlockCounterKey = "unlockCounter"
         var destination: WallpaperDestination
         let isPreview: Bool
         var unlockedAt: Date?
+        /// The display's lasting identity, for a display with a wallpaper of its own.
+        var display: String?
     }
 
     private let location = LibraryLocation.current
@@ -72,10 +75,11 @@ private let unlockCounterKey = "unlockCounter"
         // A wallpaper just picked plays for a moment before resting, as after an unlock.
         records[id] = Record(surface: surface, configuration: configuration, presentation: request.presentationMode,
                              activity: request.activityState, appearance: request.systemAppearance,
-                             destination: request.destination, isPreview: request.isPreview, unlockedAt: Date())
+                             destination: request.destination, isPreview: request.isPreview, unlockedAt: Date(),
+                             display: Self.displayKey(request.destination))
         showContent(for: id)
         reevaluate()
-        log.notice("acquire \(id, privacy: .public) preview=\(request.isPreview) mode=\(String(describing: request.presentationMode), privacy: .public) context=\(surface.contextID)")
+        log.notice("acquire \(id, privacy: .public) preview=\(request.isPreview) mode=\(String(describing: request.presentationMode), privacy: .public) display=\(records[id]?.display ?? "unknown", privacy: .public) context=\(surface.contextID)")
         return surface.contextID
     }
 
@@ -85,13 +89,19 @@ private let unlockCounterKey = "unlockCounter"
             record.unlockedAt = Date()
         }
         countUnlock(from: record.presentation, to: request.presentationMode)
-        let contentMayChange = record.presentation != request.presentationMode || record.appearance != request.systemAppearance
+        var contentMayChange = record.presentation != request.presentationMode || record.appearance != request.systemAppearance
         record.presentation = request.presentationMode
         record.activity = request.activityState
         record.appearance = request.systemAppearance
         if record.destination != request.destination {
             record.destination = request.destination
             record.surface.resize(to: request.destination)
+            // A surface moved to another display shows that display's wallpaper.
+            let display = Self.displayKey(request.destination)
+            if display != record.display {
+                record.display = display
+                contentMayChange = true
+            }
         }
         records[id] = record
         if contentMayChange { refreshContent() }
@@ -155,7 +165,10 @@ private let unlockCounterKey = "unlockCounter"
         for id in records.keys { showContent(for: id) }
         let now = Date()
         // Previews carry no configuration and follow Kinora's selection, so they count too.
-        let next = records.values.compactMap { ($0.configuration?.rules(selection: selection) ?? selection?.rules)?.nextChange(after: now) }.min()
+        let next = records.values.compactMap { record in
+            (record.configuration?.rules(selection: selection, display: record.display) ?? selection?.rules(forDisplay: record.display))?
+                .nextChange(after: now)
+        }.min()
         changeTimer?.invalidate()
         changeTimer = next.map { date in
             Timer.scheduledTimer(withTimeInterval: max(1, date.timeIntervalSinceNow + 0.5), repeats: false) { [weak self] _ in
@@ -172,7 +185,7 @@ private let unlockCounterKey = "unlockCounter"
         let resolution = SurfaceResolution.resolve(configuration: record.configuration, selection: selection,
                                                    mode: record.presentation, appearance: record.appearance, at: Date(),
                                                    unlockCount: unlocks.count, library: location.showableItemIDs(library.items),
-                                                   originalsAvailable: metal)
+                                                   originalsAvailable: metal, display: record.display)
         // An item deleted from the library falls back to another one the rules name, then
         // Kinora's own selection, then any item, so the surface never goes blank.
         guard let resolved = resolution.shown else {
@@ -204,6 +217,12 @@ private let unlockCounterKey = "unlockCounter"
                                          frameCap: conditions.onBattery ? settings.batteryFrameCap : nil)
             }
         }
+    }
+
+    /// The lasting identity of the display a surface is for. Nil when the request didn't name a
+    /// display or macOS can't identify it; the surface then shows the main rules.
+    private static func displayKey(_ destination: WallpaperDestination) -> String? {
+        destination.directDisplayID.flatMap { DisplayChoice.key(for: CGDirectDisplayID($0)) }
     }
 
     private func reevaluate() {
