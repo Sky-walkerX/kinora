@@ -273,7 +273,7 @@ struct LivingPhotoSheet: View {
         switch maker.phase {
         case .choosing:
             VStack(spacing: 10) {
-                Image(systemName: "photo.badge.plus").font(.largeTitle).foregroundStyle(.secondary)
+                Image(systemName: "photo.badge.plus").font(.largeTitle).foregroundStyle(.secondary).accessibilityHidden(true)
                 Text("Drop a photo here").foregroundStyle(.secondary)
                 Button("Choose a Photo…") { choosing = true }
             }
@@ -285,7 +285,7 @@ struct LivingPhotoSheet: View {
             }
         case .failed(let message):
             VStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(.secondary)
+                Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(.secondary).accessibilityHidden(true)
                 Text(message).multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal)
                 Button("Choose Another Photo…") { choosing = true }
             }
@@ -333,9 +333,11 @@ struct LivingPhotoSheet: View {
 struct LivingPhotoPreview: View {
     let renderer: LivingPhotoRenderer
     let motion: LivingPhotoMotion
+    /// With Reduce Motion the preview holds its first frame, as the originals' previews do.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
             let seconds = renderer.plan.seconds
             let t = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: seconds) / seconds
             if let image = renderer.image(at: t) {

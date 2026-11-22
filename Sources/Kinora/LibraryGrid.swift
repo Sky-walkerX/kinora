@@ -86,6 +86,10 @@ struct LibraryGrid: View {
                     isCurrent: wallpaper.shownItems(dark: colorScheme == .dark).contains(item.id))
             .onTapGesture { selection = item.id }
             .simultaneousGesture(TapGesture(count: 2).onEnded { Task { await wallpaper.use(item) } })
+            // The taps above are mouse-only; VoiceOver gets the same two actions.
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { selection = item.id }
+            .accessibilityAction(named: "Use as Wallpaper") { Task { await wallpaper.use(item) } }
             .contextMenu {
                 Button("Use as Wallpaper") { Task { await wallpaper.use(item) } }
                 if wallpaper.displays.count > 1 {
@@ -231,6 +235,7 @@ struct LibraryTile: View {
 struct KindBadge: View {
     let symbol: String
     let label: String
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     init?(kind: LibraryItem.Kind) {
         guard let mark = Self.mark(for: kind) else { return nil }
@@ -251,7 +256,7 @@ struct KindBadge: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.white)
             .padding(5)
-            .background(.black.opacity(0.45), in: .circle)
+            .background(.black.opacity(reduceTransparency ? 0.85 : 0.45), in: .circle)
             .accessibilityLabel(label)
             .help(label)
     }
@@ -267,10 +272,11 @@ struct Thumbnail: View {
             .fill(.quaternary)
             .aspectRatio(16 / 10, contentMode: .fit)
             .overlay {
+                // Decorative: every thumbnail sits next to the wallpaper's name.
                 if let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().scaledToFill()
+                    Image(nsImage: image).resizable().scaledToFill().accessibilityHidden(true)
                 } else {
-                    Image(systemName: "film").foregroundStyle(.secondary)
+                    Image(systemName: "film").foregroundStyle(.secondary).accessibilityHidden(true)
                 }
             }
             .clipped()
