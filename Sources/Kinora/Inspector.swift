@@ -177,7 +177,7 @@ struct Inspector: View {
                     .accessibilityLabel("\(display.name) Lock Screen")
                 }
             }
-            ForEach(wallpaper.disconnectedChoices, id: \.key) { entry in
+            ForEach(wallpaper.disconnectedChoices) { entry in
                 LabeledContent {
                     HStack {
                         Text(name(of: entry.choice.wallpaper)).foregroundStyle(.secondary)

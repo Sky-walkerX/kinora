@@ -94,6 +94,9 @@ import Observation
     }
 
     func refresh() {
+        // Read here too: the controller can be made before AppKit knows the screens.
+        let connected = ConnectedDisplay.all()
+        if connected != displays { displays = connected }
         plugIn = PlugInRegistration.state()
         canRestore = store.hasOriginalBackup
         selection = (try? Data(contentsOf: location.selection)).flatMap(KinoraSelection.decode)
@@ -180,10 +183,10 @@ import Observation
     }
 
     /// Displays with a choice of their own that aren't connected now, with the name they had.
-    var disconnectedChoices: [(key: String, choice: DisplayChoice)] {
+    var disconnectedChoices: [KeptDisplayChoice] {
         guard followsSelection, let displays = selection?.displays else { return [] }
         let connected = Set(self.displays.map(\.key))
-        return displays.filter { !connected.contains($0.key) }.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        return displays.filter { !connected.contains($0.key) }.sorted { $0.key < $1.key }.map { KeptDisplayChoice(key: $0.key, choice: $0.value) }
     }
 
     /// The rules to edit: the live selection when there is one, else a fresh one around `fallback`.
@@ -435,6 +438,13 @@ enum Shell {
         process.waitUntilExit()
         return Result(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
     }
+}
+
+/// A display's own choice, kept while the display is disconnected.
+struct KeptDisplayChoice: Identifiable {
+    let key: String
+    let choice: DisplayChoice
+    var id: String { key }
 }
 
 /// A display connected now, named as macOS names it, with the lasting identity the plug-in
