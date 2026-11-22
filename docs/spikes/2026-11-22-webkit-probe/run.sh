@@ -72,12 +72,31 @@ PLIST
     codesign --force --sign - --options runtime --entitlements "$(entitlements $variant)" "$app" || exit 1
     echo "== $variant: $(codesign -d --entitlements - --xml "$app" 2>/dev/null | tr -d '\n' | grep -o 'com.apple.security[a-z.-]*' | tr '\n' ' ')"
     started=$(date "+%Y-%m-%d %H:%M:%S")
-    "$app/Contents/MacOS/WebProbe" "$PAGE_DIR/index.html" 2>"$OUT/$variant.stderr" | while IFS= read -r line; do
+    # The probe stops itself after 120 s; a blocked main thread can't, so a watchdog kills it at 150 s.
+    "$app/Contents/MacOS/WebProbe" "$PAGE_DIR/index.html" >"$OUT/$variant.stdout" 2>"$OUT/$variant.stderr" &
+    probe=$!
+    ( sleep 150; kill -9 $probe 2>/dev/null && echo "   watchdog: killed the $variant probe after 150 s" ) &
+    watchdog=$!
+    wait $probe; status=$?
+    kill $watchdog 2>/dev/null; wait $watchdog 2>/dev/null
+    echo "   exit status $status"
+    grep '^WEBPROBE' "$OUT/$variant.stdout" | while IFS= read -r line; do
         echo "$line"
-        case $line in WEBPROBE*) printf '{"variant":"%s",%s\n' "$variant" "${line#WEBPROBE \{}" >> "$OUT/results.jsonl" ;; esac
+        printf '{"variant":"%s",%s\n' "$variant" "${line#WEBPROBE \{}" >> "$OUT/results.jsonl"
     done
+    [ $status -eq 0 ] || printf '{"variant":"%s","event":"exit","status":%d}\n' "$variant" "$status" >> "$OUT/results.jsonl"
     /usr/bin/log show --start "$started" --style compact \
         --predicate 'process == "WebProbe" OR process BEGINSWITH "com.apple.WebKit" OR (process == "kernel" AND eventMessage CONTAINS "WebProbe")' \
         2>/dev/null | grep -iE "sandbox|deny|denied|crash|terminat|error|fail" | tail -80 > "$OUT/$variant.log" || true
     echo "   log lines about sandbox or errors: $(wc -l < "$OUT/$variant.log" | tr -d ' ')"
+    # What the sandbox refused WebKit's processes, and how a WebContent process ended, if it crashed.
+    /usr/bin/log show --start "$started" --style compact --predicate 'eventMessage CONTAINS "deny" AND eventMessage CONTAINS "WebKit"' \
+        2>/dev/null | grep -v "^Timestamp" | sed -E 's/^.*(deny\([0-9]+\))/\1/' | sort | uniq -c | sort -rn | head -25 > "$OUT/$variant.denials" || true
+    echo "   distinct sandbox denials for WebKit processes: $(wc -l < "$OUT/$variant.denials" | tr -d ' ')"
+    head -8 "$OUT/$variant.denials" | sed 's/^/     /'
+    find "$HOME/Library/Logs/DiagnosticReports" -name '*WebContent*' -newermt "$started" 2>/dev/null | head -3 | while read -r report; do
+        echo "   crash report: $(basename "$report")"
+        grep -aE '"(exception|termination|crashed|faultingThread|asi)"|Termination Reason|Exception Type|Crashed Thread|abort|ASI' "$report" | head -8 | cut -c1-300 | sed 's/^/     /'
+        cp "$report" "$OUT/$variant-$(basename "$report")"
+    done
 done

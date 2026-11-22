@@ -43,16 +43,17 @@ jobs:
           python3 -I - "$RUNNER_TEMP/webprobe/results.jsonl" <<'PY'
           import json, sys
           keys = ["loaded", "windowVisible", "occlusionVisible", "visibilityState", "rafPerSecond", "timerPerSecond",
-                  "cssMsPerSecond", "snapshotFlat", "snapshotChange", "method", "hostedFlat", "hostedMeanLuma",
-                  "hostedChange", "webContentTerminated", "loadError", "javascript", "occlusionSwitch"]
+                  "cssMsPerSecond", "snapshotFlat", "snapshotChange", "method", "hostedBefore", "hostedAfter",
+                  "hostedChange", "hostedLater", "hostedChangeLater", "webContentTerminated", "loadError", "javascript",
+                  "occlusionSwitch", "prefCSSAnimations", "prefTimers", "prefSuppression"]
           for line in open(sys.argv[1]):
               row = json.loads(line)
               if row.get("event") == "scenario":
                   print("SUMMARY", row["variant"], row["name"], " ".join(f"{k}={row[k]}" for k in keys if k in row))
-              elif row.get("event") in ("start", "timeout"):
+              elif row.get("event") in ("start", "timeout", "exit"):
                   print("SUMMARY", row["variant"], json.dumps(row, sort_keys=True))
           PY
-          for f in "$RUNNER_TEMP"/webprobe/*.log; do echo "== $f"; head -40 "$f"; done
+          for f in "$RUNNER_TEMP"/webprobe/*.denials; do echo "== $f"; cat "$f"; done
 
       - name: Upload results
         if: always()
@@ -63,5 +64,8 @@ jobs:
             ${{ runner.temp }}/webprobe/results.jsonl
             ${{ runner.temp }}/webprobe/*.log
             ${{ runner.temp }}/webprobe/*.stderr
+            ${{ runner.temp }}/webprobe/*.stdout
+            ${{ runner.temp }}/webprobe/*.denials
+            ${{ runner.temp }}/webprobe/*.ips
           retention-days: 14
           if-no-files-found: warn

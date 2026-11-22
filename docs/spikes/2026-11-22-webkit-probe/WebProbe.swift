@@ -76,6 +76,15 @@ import WebKit
     }
 }
 
+/// Calls a private Boolean setter when the object has it. Returns whether it did.
+@MainActor @discardableResult func setPrivateBool(_ object: NSObject, _ name: String, _ value: Bool) -> Bool {
+    let selector = NSSelectorFromString(name)
+    guard let method = class_getInstanceMethod(type(of: object), selector) else { return false }
+    typealias SetBool = @convention(c) (AnyObject, Selector, Bool) -> Void
+    unsafeBitCast(method_getImplementation(method), to: SetBool.self)(object, selector, value)
+    return true
+}
+
 /// A layer that shows another context's layers, as WallpaperAgent shows the plug-in's.
 @MainActor func layerHost(for contextID: UInt32) -> CALayer? {
     guard let cls = NSClassFromString("CALayerHost") as? CALayer.Type else { return nil }
@@ -152,7 +161,8 @@ func difference(_ a: [UInt8], _ b: [UInt8]) -> Double {
             "caContext": NSClassFromString("CAContext") != nil,
             "caLayerHost": NSClassFromString("CALayerHost") != nil,
         ])
-        for scenario in ["visible", "hidden", "hiddenNoOcclusion", "offscreen", "hostedHidden", "hostedOffscreen"] {
+        for scenario in ["visible", "hidden", "hiddenNoOcclusion", "hiddenPrefs", "offscreen", "offscreenNoOcclusion",
+                         "hostedHidden", "hostedOffscreen", "hostedOffscreenNoOcclusion"] {
             await run(scenario)
         }
         emit(["event": "end"])
@@ -161,6 +171,13 @@ func difference(_ a: [UInt8], _ b: [UInt8]) -> Double {
     func run(_ scenario: String) async {
         var result: [String: Any] = ["event": "scenario", "name": scenario]
         let configuration = WKWebViewConfiguration()
+        if scenario == "hiddenPrefs" {
+            // WebKit's own switches for pages nobody can see. Private: reported when missing.
+            let preferences = configuration.preferences
+            result["prefCSSAnimations"] = setPrivateBool(preferences, "_setHiddenPageCSSAnimationSuspensionEnabled:", false)
+            result["prefTimers"] = setPrivateBool(preferences, "_setHiddenPageDOMTimerThrottlingEnabled:", false)
+            result["prefSuppression"] = setPrivateBool(preferences, "_setPageVisibilityBasedProcessSuppressionEnabled:", false)
+        }
         let webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -173,15 +190,15 @@ func difference(_ a: [UInt8], _ b: [UInt8]) -> Double {
             window.setFrameOrigin(NSPoint(x: 40, y: 40))
             window.orderFrontRegardless()
         case "hiddenNoOcclusion":
-            // A WebKit switch for views in windows that are never shown. Private: reported when missing.
-            let selector = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
-            result["occlusionSwitch"] = webView.responds(to: selector)
-            if let method = class_getInstanceMethod(type(of: webView), selector) {
-                typealias SetBool = @convention(c) (AnyObject, Selector, Bool) -> Void
-                unsafeBitCast(method_getImplementation(method), to: SetBool.self)(webView, selector, false)
-            }
+            // A WebKit switch that ignores whether the window is covered. Private: reported when missing.
+            result["occlusionSwitch"] = setPrivateBool(webView, "_setWindowOcclusionDetectionEnabled:", false)
         case "offscreen", "hostedOffscreen":
             // Shown, but far outside every display.
+            window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+            window.orderFrontRegardless()
+        case "offscreenNoOcclusion", "hostedOffscreenNoOcclusion":
+            // Shown far outside every display, with WebKit told to ignore that nobody can see it.
+            result["occlusionSwitch"] = setPrivateBool(webView, "_setWindowOcclusionDetectionEnabled:", false)
             window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
             window.orderFrontRegardless()
         default:
@@ -269,9 +286,16 @@ func difference(_ a: [UInt8], _ b: [UInt8]) -> Double {
         }
         if hostWindow != nil {
             if let a = captureBefore, let b = captureAfter {
-                result["hostedFlat"] = a.flat && b.flat
-                result["hostedMeanLuma"] = round(b.mean)
+                // Magenta (luma about 102, flat) means nothing arrived through the remote context.
+                result["hostedBefore"] = "\(a.flat ? "flat" : "varied") \(Int(a.mean.rounded()))"
+                result["hostedAfter"] = "\(b.flat ? "flat" : "varied") \(Int(b.mean.rounded()))"
                 result["hostedChange"] = round(difference(a.print, b.print) * 10) / 10
+                // A third capture, a second later, says whether the hosted pixels keep moving.
+                await pause(1)
+                if let c = hostWindow.flatMap(capture).flatMap(summary) {
+                    result["hostedLater"] = "\(c.flat ? "flat" : "varied") \(Int(c.mean.rounded()))"
+                    result["hostedChangeLater"] = round(difference(b.print, c.print) * 10) / 10
+                }
             } else {
                 result["hostedCapture"] = "unavailable"
             }
