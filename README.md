@@ -14,7 +14,7 @@ For current implementation status, what has and hasn't been verified on a real M
 - **Living Photos:** turns a still photo into a gently moving wallpaper by lifting its subject off the background, all on your Mac.
 - **Kinora Originals:** generative wallpapers drawn live with Metal, including a sky that follows the real sun where you are, with no download.
 - Your own videos, pictures and GIFs, converted once to a size your display needs, with the disk space saved shown. Apple's downloaded aerials, played in place.
-- Playlists, a time-of-day schedule, and separate Lock Screen and Dark Mode wallpapers.
+- Playlists, a time-of-day schedule, separate Lock Screen and Dark Mode wallpapers, and a wallpaper of its own for each display.
 - An [open wallpaper format](docs/FORMAT.md) anyone can publish in, without Steam or a purchase, and a gallery of wallpapers that are free to share (not yet published).
 - Imports video wallpapers from Lively and Wallpaper Engine folders you already have, including WebM and MKV videos, which Kinora converts itself, and says plainly what it can't import.
 - No account, no paywall, no telemetry. It only goes online when you browse the gallery or check for updates.
