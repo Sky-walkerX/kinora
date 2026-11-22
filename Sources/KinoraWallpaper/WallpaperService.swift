@@ -79,7 +79,8 @@ private let unlockCounterKey = "unlockCounter"
                              display: Self.displayKey(request.destination))
         showContent(for: id)
         reevaluate()
-        log.notice("acquire \(id, privacy: .public) preview=\(request.isPreview) mode=\(String(describing: request.presentationMode), privacy: .public) display=\(records[id]?.display ?? "unknown", privacy: .public) context=\(surface.contextID)")
+        let display = records[id]?.display ?? "unknown"
+        log.notice("acquire \(id, privacy: .public) preview=\(request.isPreview) mode=\(String(describing: request.presentationMode), privacy: .public) display=\(display, privacy: .public) context=\(surface.contextID)")
         return surface.contextID
     }
 
